@@ -42,6 +42,11 @@ param(
     # back to the official behaviour of turning into a WHITE whale on a dark theme.
     [switch]$NoFaviconPatch,
 
+    # Patch the frontend favicon (the browser tab icon) and do nothing else. This
+    # is the run to use when the npm cache belongs to Administrators and the tab
+    # icon is the only thing that needs one elevated invocation.
+    [switch]$OnlyFavicon,
+
     # Put the installed frontend's original favicon.svg back and do nothing else.
     [switch]$RestoreFavicon,
 
@@ -236,6 +241,52 @@ function Update-FrontendFavicon {
         Copy-Item -LiteralPath $BlackSvg -Destination $Target -Force
     }
     return $true
+}
+
+# One reporting wrapper around the patch, so the normal install and the elevated
+# `-OnlyFavicon` run explain themselves identically.
+function Set-FrontendFavicon {
+    param([string]$Target, [string]$BlackSvg)
+
+    $elevatedHint = 'For the always-black tab icon, run this once from an elevated PowerShell:'
+    $elevatedCmd = '  powershell -ExecutionPolicy Bypass -File .\install.ps1 -OnlyFavicon'
+
+    if (-not $Target) {
+        Write-Warn 'the installed dsh frontend was not found next to the dsh package; nothing to patch'
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $BlackSvg)) {
+        Write-Warn "missing asset: $BlackSvg"
+        return $false
+    }
+    if (-not (Test-WritableFile -Target $Target)) {
+        Write-Warn "cannot write $Target"
+        Write-Warn 'this npm cache belongs to Administrators - the same reason npx needed an elevated console.'
+        Write-Warn 'Everything else in this installer still works without administrator rights.'
+        Write-Warn $elevatedHint
+        Write-Warn $elevatedCmd
+        Write-Warn 'or skip the tab icon with -NoFaviconPatch.'
+        return $false
+    }
+
+    try {
+        Update-FrontendFavicon -Target $Target -BlackSvg $BlackSvg | Out-Null
+        # Verify by comparing the bytes actually on disk with the asset. Grepping
+        # for the dark-mode rule would be wrong: the asset documents that rule in
+        # its own comment.
+        $want = [System.IO.File]::ReadAllText($BlackSvg)
+        $have = [System.IO.File]::ReadAllText($Target)
+        if ($have -ne $want) {
+            Write-Warn "the patch did not take: $Target"
+            return $false
+        }
+        Write-Ok "$Target (original kept as favicon.svg.orig)"
+        return $true
+    }
+    catch {
+        Write-Warn "could not patch the favicon: $($_.Exception.Message)"
+        return $false
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -449,7 +500,14 @@ if ($WhatIfOnly) {
 if (-not $node) { throw 'cannot continue without node.exe; pass -NodeExe <path>' }
 if (-not $dsh) { throw 'cannot continue without the dsh package; run: npx @deepseek-ai/dsh --version' }
 
-# 4a. put the official favicon back and stop here.
+# 4a. the tab icon on its own, for the one elevated run.
+if ($OnlyFavicon) {
+    Write-Step 'Patching the browser tab icon only'
+    [void](Set-FrontendFavicon -Target $favicon -BlackSvg $whaleBlackSvg)
+    return
+}
+
+# 4b. put the official favicon back and stop here.
 if ($RestoreFavicon) {
     Write-Step 'Restoring the original frontend favicon'
     if (-not $favicon) { Write-Warn 'the frontend favicon was not found; nothing to restore' }
@@ -464,7 +522,7 @@ if ($RestoreFavicon) {
     return
 }
 
-# 4b. materialise a concrete launcher.
+# 4c. materialise a concrete launcher.
 #
 # The batch file must stay pure ASCII: cmd.exe parses a .cmd by byte offset
 # while decoding it with the console code page, so a UTF-8 non-ASCII character
@@ -501,44 +559,20 @@ $badBytes = ([System.IO.File]::ReadAllBytes($launcherOut) | Where-Object { $_ -g
 if ($badBytes -ne 0) { throw "generated launcher contains $badBytes non-ASCII bytes; cmd.exe would mis-parse it" }
 Write-Ok $launcherOut
 
-# 4c. icon
+# 4d. icon
 Write-Step 'Building the whale icon'
 $ico = Join-Path $repoDir 'deepseek-whale.ico'
 New-WhaleIcon -SvgPath $whaleSvg -OutIco $ico | Out-Null
 Write-Ok "$ico ($((Get-Item -LiteralPath $ico).Length) bytes)"
 
-# 4d. the favicon the browser tab shows
+# 4e. the favicon the browser tab shows
 if ($NoFaviconPatch) {
     Write-Step 'Favicon patch skipped (-NoFaviconPatch)'
     Write-Warn 'the tab icon keeps the official behaviour: white whale on a dark theme'
 }
 else {
     Write-Step 'Making the browser tab icon an always-black whale'
-    if (-not $favicon) {
-        Write-Warn 'the installed dsh frontend was not found next to the dsh package; nothing to patch'
-    }
-    elseif (-not (Test-Path -LiteralPath $whaleBlackSvg)) {
-        Write-Warn "missing asset: $whaleBlackSvg"
-    }
-    elseif (-not $faviconWritable) {
-        Write-Warn "cannot write $favicon"
-        Write-Warn 'this npm cache belongs to Administrators (the same reason npx needed an elevated console).'
-        Write-Warn 'Everything else in this installer still works without administrator rights.'
-        Write-Warn 'For the always-black tab icon, run this once from an elevated PowerShell:'
-        Write-Warn '  powershell -ExecutionPolicy Bypass -File .\install.ps1 -NoShortcut'
-        Write-Warn 'or skip the icon with -NoFaviconPatch.'
-    }
-    else {
-        try {
-            Update-FrontendFavicon -Target $favicon -BlackSvg $whaleBlackSvg | Out-Null
-            $patched = [System.IO.File]::ReadAllText($favicon)
-            if ($patched -match 'prefers-color-scheme') { Write-Warn "the patch did not take: $favicon" }
-            else { Write-Ok "$favicon (original kept as favicon.svg.orig)" }
-        }
-        catch {
-            Write-Warn "could not patch the favicon: $($_.Exception.Message)"
-        }
-    }
+    Set-FrontendFavicon -Target $favicon -BlackSvg $whaleBlackSvg | Out-Null
 }
 
 if ($NoShortcut) {
@@ -546,7 +580,7 @@ if ($NoShortcut) {
     return
 }
 
-# 4e. shortcut
+# 4f. shortcut
 Write-Step 'Creating the desktop shortcut'
 if (-not (Test-Path -LiteralPath $DesktopDir)) { New-Item -ItemType Directory -Path $DesktopDir -Force | Out-Null }
 $lnkPath = Join-Path $DesktopDir ($ShortcutName + '.lnk')

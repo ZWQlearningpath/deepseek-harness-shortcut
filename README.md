@@ -210,7 +210,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 >
 > **如果第 3 步提示 `NOT WRITABLE`**：npm 缓存目录属于 `BUILTIN\Administrators`（就是[根因](#根因)里
 > 那种机器级 Node 安装，普通账号只有读权限），那就从**管理员** PowerShell 跑一次
-> `install.ps1 -NoShortcut`。这是**唯一**需要提权的一步 —— 双击启动、开 Edge、复用实例都不需要管理员。
+> `install.ps1 -OnlyFavicon`（在仓库目录里跑）。这是**唯一**需要提权的一步 —— 双击启动、开 Edge、复用实例都不需要管理员。
 
 ### 第 5 步 — 使用
 
@@ -237,7 +237,7 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 | 提示找不到 dsh 包 | dsh 还没装进 npx 缓存，回到第 1 步；或确认 `npm config get cache` 的目录 |
 | 端口被占用 | 现在不会了：已有实例在跑就直接开一个新标签页连上去。想换个端口：`DeepSeekHarness.local.cmd --port 3099` |
 | 页面提示需要认证 | 浏览器里没有登录 Cookie（清过、或换了浏览器配置）。用已经在跑的那个控制台窗口打印的 URL 打开一次即可，Cookie 有效期 30 天 |
-| 标签页图标是白色鲸鱼 | 两种可能：① dsh 升级把前端 favicon 覆盖了，重跑一次 `install.ps1`；② npm 缓存属于 `Administrators`（见[根因](#根因)），补丁写不进去 —— 从**管理员** PowerShell 跑一次 `install.ps1 -NoShortcut`。这是唯一需要提权的一步 |
+| 标签页图标是白色鲸鱼 | 两种可能：① dsh 升级把前端 favicon 覆盖了，重跑一次 `install.ps1`；② npm 缓存属于 `Administrators`（见[根因](#根因)），补丁写不进去 —— 在仓库目录里用**管理员** PowerShell 跑一次 `install.ps1 -OnlyFavicon`。这是唯一需要提权的一步 |
 | 打开的不是 Edge | 没找到 `msedge.exe`（控制台会说明）。装了 Edge 后重跑 `install.ps1`，或用 `-EdgeExe` 指定 |
 | 桌面图标还是旧的 | Explorer 图标缓存，桌面按 **F5** 刷新 |
 | 不想用脚本 | 直接双击 `DeepSeekHarness.cmd`，它运行时自动检测 Node 和 dsh（需要和 `launch.ps1` 在同一个文件夹里） |
@@ -287,6 +287,7 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 | `-ShortcutName <名字>` | 快捷方式文件名（不含 `.lnk`），默认 `DeepSeek Harness` |
 | `-NoShortcut` | 只生成图标、启动器和 favicon 补丁，不建快捷方式 |
 | `-NoFaviconPatch` | 不动已安装 dsh 前端的 favicon（标签页图标恢复"深色主题变白"的官方行为） |
+| `-OnlyFavicon` | 只修补前端 favicon（浏览器标签页图标），其他什么都不做 —— npm 缓存属于 Administrators 时，提权运行就用这一条 |
 | `-RestoreFavicon` | 把前端原来的 `favicon.svg` 还原回去，其他什么都不做 |
 | `-WhatIfOnly` | 只检测并打印，不写任何文件 |
 
@@ -334,7 +335,7 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 * 这是安装脚本**唯一**动到的仓库之外的文件，见[安全说明](#安全说明)。
 * **可能唯一需要提权的一步**：npm 缓存目录属于 `BUILTIN\Administrators` 时（[根因](#根因)里那种
   机器级 Node 安装），普通账号连这个文件都改不了。`install.ps1` 会先探测写权限并明确提示
-  `NOT WRITABLE`，这时从**管理员** PowerShell 跑一次 `install.ps1 -NoShortcut`。启动器本身
+  `NOT WRITABLE`，这时在仓库目录里用**管理员** PowerShell 跑一次 `install.ps1 -OnlyFavicon`。启动器本身
   （双击、开 Edge、复用实例）永远不需要管理员。
 
 ### 为什么 `DrawIcon` 可能读不了生成的图标
@@ -787,7 +788,8 @@ safe.
 > **If step 3 reports `NOT WRITABLE`**: the npm cache belongs to
 > `BUILTIN\Administrators` (the machine-wide Node.js install described under
 > [Root cause](#root-cause), where ordinary accounts can only read), so run
-> `install.ps1 -NoShortcut` once from an **elevated** PowerShell. That is the
+> `install.ps1 -OnlyFavicon` (from the repository folder) once from an **elevated**
+> PowerShell. That is the
 > **only** step that ever needs administrator rights — double-clicking, opening
 > Edge and reusing a running instance never do.
 
@@ -871,6 +873,7 @@ next to it) opens Edge, and it will not create a desktop shortcut or the icon.
 | `-ShortcutName <name>` | Shortcut filename without `.lnk`. Defaults to `DeepSeek Harness`. |
 | `-NoShortcut` | Build the icon, launcher and favicon patch only. |
 | `-NoFaviconPatch` | Leave the installed frontend's favicon alone (the tab icon goes back to the official white-on-dark behaviour). |
+| `-OnlyFavicon` | Patch the frontend favicon (the browser tab icon) and do nothing else - the command for the single elevated run when the npm cache belongs to Administrators. |
 | `-RestoreFavicon` | Put the frontend's original `favicon.svg` back and do nothing else. |
 | `-WhatIfOnly` | Detect and report; write nothing. |
 
@@ -927,7 +930,7 @@ official file) over `dist/favicon.svg`, keeping the original next to it as
   `BUILTIN\Administrators` (the machine-wide Node.js install described under
   [Root cause](#root-cause)) an ordinary account cannot write this file at all.
   `install.ps1` probes for write access first and says `NOT WRITABLE`; run
-  `install.ps1 -NoShortcut` once from an elevated PowerShell. The launcher itself
+  `install.ps1 -OnlyFavicon` once from an elevated PowerShell. The launcher itself
   — double-click, Edge, reuse — never needs administrator rights.
 
 ### Why `DrawIcon` may fail on the generated file
@@ -1054,7 +1057,7 @@ window that is already running, once.
 **The tab icon is a white whale.** Either an upgrade replaced the frontend's
 `favicon.svg` (run `install.ps1` again), or the npm cache belongs to
 `Administrators` (see [Root cause](#root-cause)) and the patch could not be
-written — run `install.ps1 -NoShortcut` once from an elevated PowerShell. That is
+written — run `install.ps1 -OnlyFavicon` once from an elevated PowerShell. That is
 the only step that needs elevation.
 
 **The desktop icon still looks like the old one.** Explorer caches icons; press
