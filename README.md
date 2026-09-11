@@ -10,6 +10,115 @@ Desktop shortcut  →  DeepSeekHarness.local.cmd  →  node.exe  …\@deepseek-a
 
 ---
 
+## 中文安装教程
+
+让 DeepSeek Harness（`@deepseek-ai/dsh`）在桌面**双击直接打开，不需要管理员权限、不弹 UAC**，
+并使用官方黑色鲸鱼图标（**透明背景，不是白底**）。
+
+### 第 0 步 — 前置条件
+
+* Windows 10 / 11
+* 已安装 Node.js（`node --version` 能输出版本号）
+* `dsh` 至少安装过一次（这样它才会存在于 npx 缓存里）
+
+### 第 1 步 — 先安装一次 dsh
+
+如果 `npx @deepseek-ai/dsh --version` 已经能输出版本号，跳过这步。
+
+```powershell
+npx @deepseek-ai/dsh --version
+```
+
+> 如果这里就报 `EPERM ... _cacache`，说明 npm 缓存目录普通用户没有写权限。
+> 可以用管理员身份执行一次，或者把 npm 缓存改到自己的目录：
+> ```powershell
+> npm config set cache "$env:LOCALAPPDATA\npm-cache"
+> ```
+> 注意：**装好之后就不需要再用 npx 启动了**，这正是本启动器要绕开的问题。
+
+### 第 2 步 — 获取本仓库
+
+```powershell
+git clone https://github.com/ZWQlearningpath/deepseek-harness-shortcut.git
+cd deepseek-harness-shortcut
+```
+
+没装 git 的话，在 GitHub 页面点 **Code → Download ZIP**，解压到任意目录即可。
+
+### 第 3 步 — 先干跑，确认能检测到路径（不写任何东西）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -WhatIfOnly
+```
+
+正常应该看到类似：
+
+```
+==> Detecting Node.js
+    C:\Program Files\nodejs\node.exe
+==> Locating the installed dsh package
+    C:\Users\<你>\AppData\Local\npm-cache\_npx\<hash>\node_modules\@deepseek-ai\dsh\lib\bin.js
+==> Resolved settings
+    ...
+==> WhatIfOnly: nothing was written.
+```
+
+如果哪一项显示 *not found*，先解决它再继续（可用 `-NodeExe` / `-DshBin` 手动指定）。
+
+### 第 4 步 — 正式安装
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+它会做三件事：
+
+1. 生成 `DeepSeekHarness.local.cmd`（把检测到的路径填进去）
+2. 生成 `deepseek-whale.ico`
+3. 在桌面创建 **DeepSeek Harness** 快捷方式，并清除"以管理员身份运行"标志位
+
+成功后最后一行会显示 `run-as-administrator flag set: False`。重复运行是安全的。
+
+### 第 5 步 — 使用
+
+双击桌面上的 **DeepSeek Harness**。会弹出一个黑色命令行窗口，浏览器自动打开
+`http://127.0.0.1:3080`。
+
+**这个命令行窗口不要关**，关了服务器就停了。启动报错也会显示在这个窗口里。
+
+### 第 6 步 — 验证确实不需要管理员权限（可选）
+
+```powershell
+$b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.lnk")
+($b[0x15] -band 0x20) -ne 0     # 必须输出 False
+```
+
+### 常见问题
+
+| 现象 | 原因与处理 |
+| --- | --- |
+| PowerShell 拒绝运行脚本 | 用 `powershell -ExecutionPolicy Bypass -File .\install.ps1`，只对本次调用生效，不改系统策略 |
+| 提示找不到 dsh 包 | dsh 还没装进 npx 缓存，回到第 1 步；或确认 `npm config get cache` 的目录 |
+| 提示端口被占用 | 已有实例在跑（默认 3080）。换端口：`DeepSeekHarness.local.cmd --port 3099` |
+| 桌面图标还是旧的 | Explorer 图标缓存，桌面按 **F5** 刷新 |
+| 不想用脚本 | 直接双击 `DeepSeekHarness.cmd`，它运行时自动检测 Node 和 dsh |
+
+### 完全不用脚本的手动安装
+
+1. 把 `DeepSeekHarness.cmd` 放到一个固定文件夹
+2. 右键 → **发送到 → 桌面快捷方式**
+3. 右键快捷方式 → **属性**：*目标* 填该 `.cmd` 的完整路径，*起始位置* 填所在文件夹
+4. 想换图标：先跑一次 `install.ps1 -NoShortcut` 生成 `deepseek-whale.ico`，
+   再 **属性 → 更改图标 → 浏览** 选中它
+
+### 卸载
+
+1. 删除桌面快捷方式
+2. 删除 clone 下来的文件夹（含生成的 `deepseek-whale.ico`、`DeepSeekHarness.local.cmd`）
+3. 没有写注册表，也没改任何系统设置
+
+---
+
 ## The problem this solves
 
 The obvious shortcut is:
@@ -71,6 +180,8 @@ node.exe "<npm-cache>\_npx\<hash>\node_modules\@deepseek-ai\dsh\lib\bin.js" web
 ---
 
 ## Installation
+
+> 中文用户请直接看上面的 [中文安装教程](#中文安装教程)。
 
 Follow these steps in order. Steps 1 and 2 are prerequisites; step 3 onwards is
 the actual install.
