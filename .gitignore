@@ -1,0 +1,8 @@
+# Generated locally by install.ps1
+deepseek-whale.ico
+DeepSeekHarness.local.cmd
+out/
+
+# Test scratch
+*.test.lnk
+_test/

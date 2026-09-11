@@ -1,0 +1,15 @@
+# Keep Windows batch files in CRLF so cmd.exe parses them reliably on checkout.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# PowerShell scripts: CRLF is friendlier on Windows PowerShell 5.1.
+*.ps1 text eol=crlf
+
+# Keep the vector source as LF.
+*.svg text eol=lf
+*.md  text eol=lf
+
+# Generated locally by install.ps1 - never commit.
+deepseek-whale.ico      binary
+DeepSeekHarness.local.cmd -text
+out/                    -text
