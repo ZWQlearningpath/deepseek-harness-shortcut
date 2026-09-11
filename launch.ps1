@@ -4,14 +4,19 @@
 # things a batch file cannot do reliably:
 #
 #   1. If a Harness server already answers on the target port it does NOT start a
-#      second one. It just opens a NEW Microsoft Edge tab on the running instance,
-#      so double-clicking the shortcut twice always gives you a page, never a
+#      second one. It just opens another window on the running instance, so
+#      double-clicking the shortcut twice always gives you a page, never a
 #      "port already in use" error.
 #   2. Otherwise it starts `dsh web --no-open` with its stdout captured, watches
 #      for the authenticated URL that `dsh web` prints, and opens exactly that URL
-#      in Microsoft Edge - always a new tab, never the default browser by accident.
+#      in Microsoft Edge - never the default browser by accident.
 #   3. The server's console output is streamed into this window, so startup errors
 #      stay visible, and the server still dies with the window.
+#
+# By default the URL opens in an Edge APPLICATION window (`--app=`): no tabs, no
+# address bar, and - the point of it - its own taskbar button carrying the whale
+# icon, instead of being grouped into the Microsoft Edge button. Set
+# DSH_WINDOW=tab for an ordinary new tab in the current Edge window instead.
 #
 # Inputs travel through the environment, never through a command line, so that a
 # non-ASCII path (a Chinese folder name) never has to survive cmd.exe quoting:
@@ -20,6 +25,7 @@
 #   DSH_BIN        full path to @deepseek-ai/dsh/lib/bin.js   (required)
 #   DSH_WORKDIR    working directory for the server (optional)
 #   DSH_EDGE_EXE   full path to msedge.exe          (optional, auto-detected)
+#   DSH_WINDOW     'app' (default) or 'tab'         (optional)
 #   DSH_ARGS       extra arguments the user passed to the .cmd, forwarded as-is
 #
 #   .\launch.ps1 -ProbeOnly    report what would happen, change nothing
@@ -82,21 +88,40 @@ function Resolve-EdgeExe([string]$Explicit) {
     return ''
 }
 
-# A URL that is already open in an Edge tab can be re-activated instead of opened
-# again. A unique query parameter - which the Harness server and the Web client
-# both ignore - makes the URL differ every time, so a new tab is guaranteed.
+# A URL that is already open in an Edge tab or app window can be re-activated
+# instead of opened again. A unique query parameter - which the Harness server and
+# the Web client both ignore - makes the URL differ every time, so a new page (or
+# a new app window) is guaranteed.
 function Add-NewTabNonce([string]$Url) {
     $separator = '?'
     if ($Url.Contains('?')) { $separator = '&' }
     return $Url + $separator + 'dsh-open=' + [string][DateTime]::UtcNow.Ticks
 }
 
+# How the UI is opened:
+#   app (default) - an Edge application window: no tabs, no address bar, and its
+#                   own taskbar button carrying the whale icon, separate from the
+#                   Edge button. This is what DSH_WINDOW selects.
+#   tab           - an ordinary new tab inside the current Edge window.
+function Resolve-WindowMode([string]$Value) {
+    if ($Value -and $Value.Trim().ToLowerInvariant() -eq 'tab') { return 'tab' }
+    return 'app'
+}
+
 # Hand one URL to Microsoft Edge. Falls back to the default browser only when Edge
-# is genuinely not installed. Returns 'edge' or 'default'.
-function Open-EdgeTab([string]$Url, [string]$EdgeExe) {
+# is genuinely not installed. Returns 'app', 'tab' or 'default'.
+function Open-EdgeWindow([string]$Url, [string]$EdgeExe, [string]$Mode) {
     if ($EdgeExe) {
-        Start-Process -FilePath $EdgeExe -ArgumentList ('"' + $Url + '"') | Out-Null
-        return 'edge'
+        if ($Mode -eq 'tab') {
+            Start-Process -FilePath $EdgeExe -ArgumentList ('"' + $Url + '"') | Out-Null
+            return 'tab'
+        }
+        # Chromium parses --app=<url> into a standalone application window. The
+        # window icon comes from the page favicon, which install.ps1 pins to the
+        # black whale. The value is quoted because a token URL contains '&', which
+        # a shell would otherwise treat as a command separator.
+        Start-Process -FilePath $EdgeExe -ArgumentList ('--app="' + $Url + '"') | Out-Null
+        return 'app'
     }
     Start-Process $Url | Out-Null
     return 'default'
@@ -140,6 +165,7 @@ $dshArgs = Get-EnvText 'DSH_ARGS'
 
 $port = Get-DshPort -Arguments $dshArgs -Fallback $DefaultPort
 $edgeExe = Resolve-EdgeExe -Explicit $edgeEnv
+$windowMode = Resolve-WindowMode -Value (Get-EnvText 'DSH_WINDOW')
 $localUrl = "http://127.0.0.1:$port/"
 
 $missing = @()
@@ -151,6 +177,7 @@ if ($ProbeOnly) {
     Write-Ok "node.exe     : $(if ($nodeExe) { $nodeExe } else { '(unset)' })"
     Write-Ok "dsh bin.js   : $(if ($dshBin) { $dshBin } else { '(unset)' })"
     Write-Ok "msedge.exe   : $(if ($edgeExe) { $edgeExe } else { '(not found)' })"
+    Write-Ok "window mode  : $windowMode (DSH_WINDOW; 'app' = standalone window with its own taskbar button)"
     Write-Ok "workdir      : $(if ($workDir) { $workDir } else { '(inherited)' })"
     Write-Ok "port         : $port"
     Write-Ok "dsh args     : $(if ($dshArgs) { $dshArgs } else { '(none)' })"
@@ -171,8 +198,9 @@ if ($missing.Count -gt 0) {
 if (Test-DshWeb $port) {
     Write-Step "A DeepSeek Harness server is already running on $localUrl"
     $url = Add-NewTabNonce $localUrl
-    $how = Open-EdgeTab -Url $url -EdgeExe $edgeExe
-    if ($how -eq 'edge') { Write-Ok "opened a new Microsoft Edge tab: $url" }
+    $how = Open-EdgeWindow -Url $url -EdgeExe $edgeExe -Mode $windowMode
+    if ($how -eq 'app') { Write-Ok "opened a new Microsoft Edge app window (own taskbar button): $url" }
+    elseif ($how -eq 'tab') { Write-Ok "opened a new Microsoft Edge tab: $url" }
     else { Write-Warn "Microsoft Edge was not found; opened the default browser instead: $url" }
     Write-Ok 'no second server was started; this window can be closed right away'
     Write-Host ''
@@ -187,7 +215,13 @@ Write-Ok "dsh   : $dshBin"
 if ($edgeExe) { Write-Ok "edge  : $edgeExe" } else { Write-Warn 'Microsoft Edge was not found; the default browser will be used' }
 if ($workDir) { Write-Ok "work  : $workDir" }
 Write-Host ''
-Write-Host 'The browser UI opens in a new Microsoft Edge tab.' -ForegroundColor Green
+if ($windowMode -eq 'app') {
+    Write-Host 'The UI opens in a standalone Microsoft Edge app window: no tabs, no address' -ForegroundColor Green
+    Write-Host 'bar, and its own taskbar button with the whale icon (DSH_WINDOW=tab for a tab).'
+}
+else {
+    Write-Host 'The UI opens in a new Microsoft Edge tab.' -ForegroundColor Green
+}
 Write-Host 'Keep this window open while you use it; closing it stops the server.'
 Write-Host ''
 
@@ -222,9 +256,10 @@ try {
             if ($m.Success) {
                 $opened = $true
                 $url = Add-NewTabNonce $m.Groups[1].Value
-                $how = Open-EdgeTab -Url $url -EdgeExe $edgeExe
+                $how = Open-EdgeWindow -Url $url -EdgeExe $edgeExe -Mode $windowMode
                 Write-Host ''
-                if ($how -eq 'edge') { Write-Host "==> opened a new Microsoft Edge tab: $url" -ForegroundColor Green }
+                if ($how -eq 'app') { Write-Host "==> opened a new Microsoft Edge app window (own taskbar button): $url" -ForegroundColor Green }
+                elseif ($how -eq 'tab') { Write-Host "==> opened a new Microsoft Edge tab: $url" -ForegroundColor Green }
                 else { Write-Host "==> Microsoft Edge was not found; opened the default browser instead: $url" -ForegroundColor Yellow }
                 Write-Host ''
             }

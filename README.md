@@ -1,13 +1,14 @@
 # DeepSeek Harness — Windows 双击启动器
 
 让 **DeepSeek Harness**（`@deepseek-ai/dsh`）在桌面**双击直接打开，不需要管理员权限、不弹 UAC**，
-使用官方黑色鲸鱼图标（**透明背景，不是白底**），并且**每次都在 Microsoft Edge 里新开一个标签页**——
-包括服务已经在跑的时候：那就直接再开一个页面，而不是报「端口被占用」。
+使用官方黑色鲸鱼图标（**透明背景，不是白底**），并且**每次都在 Microsoft Edge 里新开一个独立应用窗口**——
+任务栏上它是**自己的一个按钮、图标就是黑色鲸鱼**，不和 Edge 挤在一起；服务已经在跑时也只是再开一个窗口，
+而不是报「端口被占用」。
 
 ```
 桌面快捷方式 → DeepSeekHarness.local.cmd → launch.ps1 → node.exe …\@deepseek-ai\dsh\lib\bin.js web --no-open
                                             ↓ 读出 dsh web 打印的认证 URL
-                                        msedge.exe <URL>     每次都新开一个标签页
+                                  msedge.exe --app=<URL>   每次一个新窗口，独立任务栏鲸鱼图标
 ```
 
 > English documentation is at the bottom: [English](#english).
@@ -18,7 +19,7 @@
 
 * [这个项目解决什么问题](#这个项目解决什么问题)
 * [根因](#根因)
-* [打开行为（Edge、新标签页、复用已运行的实例）](#打开行为edge新标签页复用已运行的实例)
+* [打开行为（Edge 应用窗口、复用已运行的实例）](#打开行为edge-应用窗口复用已运行的实例)
 * [安装教程](#安装教程)
 * [装完之后有什么](#装完之后有什么)
 * [图标是怎么做的](#图标是怎么做的)
@@ -87,47 +88,60 @@ node.exe "<npm-cache>\_npx\<hash>\node_modules\@deepseek-ai\dsh\lib\bin.js" web
 
 ---
 
-## 打开行为（Edge、新标签页、复用已运行的实例）
+## 打开行为（Edge 应用窗口、复用已运行的实例）
 
-浏览器这一段不在 `.cmd` 里，而在 `launch.ps1`：`.cmd` 负责探测路径，`launch.ps1` 负责开页面。
+浏览器这一段不在 `.cmd` 里，而在 `launch.ps1`：`.cmd` 负责探测路径，`launch.ps1` 负责开窗口。
 双击快捷方式后会发生三件事之一：
 
-### 1. 服务已经在跑 → 只开一个新页面，不再启动第二个服务
+### 1. 服务已经在跑 → 只开一个新窗口，不再启动第二个服务
 
 `launch.ps1` 先探测 `127.0.0.1:<端口>`（默认 3080）。如果那里已经在跑一个 Harness 服务，
-它就**不会**再启动一个（否则必然 `EADDRINUSE` 报错退出），而是直接在 Edge 里开一个新标签页连上去。
+它就**不会**再启动一个（否则必然 `EADDRINUSE` 报错退出），而是直接再开一个应用窗口连上去。
 
 判定是精确的，靠两条只有 Harness 才会给出的响应，所以别的程序占了 3080 也不会被误认：
 
 * `200` → 首页里带 `<title>DeepSeek Harness</title>`
 * `401` → 页面正文是 `dsh web authentication required`
 
-所以「已经开着控制台窗口，再双击一次快捷方式」= 又多一个页面，仅此而已。
+所以「已经开着控制台窗口，再双击一次快捷方式」= 又多一个窗口，仅此而已。
 
-> 这个页面用的是浏览器里的登录 Cookie（有效期 30 天，由第一次打开时写入）。
+> 这个窗口用的是浏览器里的登录 Cookie（有效期 30 天，由第一次打开时写入）。
 > 如果浏览器刚清过 Cookie，页面会提示要认证 —— 那就用已经开着的那个控制台窗口里打印的 URL。
 
 ### 2. 服务没在跑 → 启动它，并把**它打印的那个 URL**交给 Edge
 
 ```
-node.exe …\dsh\lib\bin.js web --no-open      ← --no-open：不让 dsh 自己调用"默认浏览器"
+node.exe …\dsh\lib\bin.js web --no-open          ← --no-open：不让 dsh 自己调用"默认浏览器"
    ↓ stdout 里出现 "dsh web: http://127.0.0.1:3080/?token=…"
-msedge.exe "http://127.0.0.1:3080/?token=…"  ← 交给 Edge，明确是 Edge
+msedge.exe --app="http://127.0.0.1:3080/?token=…"  ← 交给 Edge，明确是 Edge
 ```
 
 * 用 `--no-open` 是因为「默认浏览器」不一定是 Edge；拿到 URL 后由我们交给 `msedge.exe`。
-* `dsh web` 只在 stdout 打印那一行，所以 `launch.ps1` 捕获它的 stdout、逐行回显，读到 URL 就开页面。
+* `dsh web` 只在 stdout 打印那一行，所以 `launch.ps1` 捕获它的 stdout、逐行回显，读到 URL 就开窗口。
   stderr 仍然直连控制台，因此启动报错照旧实时可见，也不会因为管道写满而死锁。
 * URL 里的 `token` 只对**当前这个进程**有效，所以必须从输出里读，没法预先猜。
 
-### 3. 每次都是「新标签页」
+### 3. 每次都新开一个**独立应用窗口**（任务栏上是自己的鲸鱼按钮）
+
+`--app=<URL>` 是 Chromium 的"应用窗口"模式：**没有标签栏、没有地址栏**，一个干净的单页面窗口。
+关键在任务栏 —— 它的身份和普通 Edge 窗口**不是同一个**，所以
+
+* 任务栏上是**单独一个按钮**，不会并进 `Microsoft Edge` 那个图标里；
+* 这个按钮的图标就是**页面图标**，也就是我们改成黑色鲸鱼的那个 favicon；
+* 每次双击都再开一个窗口（见下），不会去聚焦旧窗口。
+
+> **想要回标签页？** 设环境变量 `DSH_WINDOW=tab`，`launch.ps1` 就会退回"在现有 Edge 窗口里新开一个标签页"
+> 的老行为（那样任务栏上就只有 Edge 一个图标了）。
+>
+> **想固定在任务栏？** 右键那个鲸鱼按钮 → **固定到任务栏**。注意 Windows 记住的是"再启动一次同样的东西"，
+> 而启动器本身（桌面快捷方式）才是负责起服务/复用实例的入口，两者分工不同。
 
 打开前会给 URL 加一个一次性的 `dsh-open=<时间戳>` 查询参数。Harness 服务端和前端都会忽略它，
-但它让 URL 每次都不同 —— 这样 Edge 不会因为「这个 URL 已经开着」而去聚焦旧标签页，而是老实新开一个。
+但它让 URL 每次都不同 —— 这样 Edge 不会因为「这个 URL 已经开着」而去聚焦旧窗口，而是老实新开一个。
 
 其他细节：
 
-* **点两次、三次都有效**：每次都会多一个标签页，都连到同一个服务。
+* **点两次、三次都有效**：每次都会多一个窗口，都连到同一个服务。
 * **端口可以改**：`DeepSeekHarness.local.cmd --port 3099`，探测和打开都用这个端口。
 * **没有 Edge 也不会挂**：只在真的找不到 `msedge.exe` 时才退回系统默认浏览器，并在控制台说明。
 * **默认端口 3080，可以用 `--port 0`** 让系统随便挑一个空闲端口，这时跳过探测、直接用服务打印的 URL。
@@ -214,13 +228,16 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ### 第 5 步 — 使用
 
-双击桌面上的 **DeepSeek Harness**。会弹出一个黑色命令行窗口，并在 **Microsoft Edge 里新开一个标签页**
-（`http://127.0.0.1:3080`，标签页图标是黑色鲸鱼）。
+双击桌面上的 **DeepSeek Harness**。会弹出一个黑色命令行窗口，并在 **Microsoft Edge 里新开一个独立应用窗口**
+（`http://127.0.0.1:3080`，没有标签栏和地址栏；任务栏上是它自己的一个按钮，图标就是黑色鲸鱼）。
 
 **这个命令行窗口不要关**，关了服务器就停了。启动报错也会显示在这个窗口里。
 
-再双击一次？服务已经在跑，所以**不会再启动第二个服务**，只是再开一个新的 Edge 标签页，
+再双击一次？服务已经在跑，所以**不会再启动第二个服务**，只是再开一个新的应用窗口，
 连到同一个服务 —— 不会出现"端口被占用"的报错。
+
+> 如果你更想要"在现有 Edge 窗口里开一个标签页"，设 `DSH_WINDOW=tab` 即可
+> （那任务栏上就只剩 Edge 一个图标了）。
 
 ### 第 6 步 — 验证确实不需要管理员权限（可选）
 
@@ -235,8 +252,10 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 | --- | --- |
 | PowerShell 拒绝运行脚本 | 用 `powershell -ExecutionPolicy Bypass -File .\install.ps1`，只对本次调用生效，不改系统策略 |
 | 提示找不到 dsh 包 | dsh 还没装进 npx 缓存，回到第 1 步；或确认 `npm config get cache` 的目录 |
-| 端口被占用 | 现在不会了：已有实例在跑就直接开一个新标签页连上去。想换个端口：`DeepSeekHarness.local.cmd --port 3099` |
+| 端口被占用 | 现在不会了：已有实例在跑就直接开一个新窗口连上去。想换个端口：`DeepSeekHarness.local.cmd --port 3099` |
 | 页面提示需要认证 | 浏览器里没有登录 Cookie（清过、或换了浏览器配置）。用已经在跑的那个控制台窗口打印的 URL 打开一次即可，Cookie 有效期 30 天 |
+| 任务栏上是 Edge 图标、不是鲸鱼 | 说明用了 `DSH_WINDOW=tab`（标签页只能属于 Edge）。删掉这个环境变量，或设为 `app`，就会变回"独立应用窗口 + 鲸鱼图标" |
+| 不想用独立窗口 | 设 `DSH_WINDOW=tab`，退回"在现有 Edge 窗口里新开标签页" |
 | 标签页图标是白色鲸鱼 | 两种可能：① dsh 升级把前端 favicon 覆盖了，重跑一次 `install.ps1`；② npm 缓存属于 `Administrators`（见[根因](#根因)），补丁写不进去 —— 在仓库目录里用**管理员** PowerShell 跑一次 `install.ps1 -OnlyFavicon`。这是唯一需要提权的一步 |
 | 打开的不是 Edge | 没找到 `msedge.exe`（控制台会说明）。装了 Edge 后重跑 `install.ps1`，或用 `-EdgeExe` 指定 |
 | 桌面图标还是旧的 | Explorer 图标缓存，桌面按 **F5** 刷新 |
@@ -268,7 +287,7 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 | --- | --- |
 | `install.ps1` | 自动检测 Node + dsh + Edge，生成图标，写启动器、修 favicon、建桌面快捷方式 |
 | `DeepSeekHarness.cmd` | 启动器入口。运行时自动检测 Node/dsh；`install.ps1` 也会把检测到的路径填进去。可单独双击 |
-| `launch.ps1` | 浏览器交接：复用已运行的服务或启动新的，读 `dsh web` 打印的认证 URL，在 Edge 里新开标签页 |
+| `launch.ps1` | 浏览器交接：复用已运行的服务或启动新的，读 `dsh web` 打印的认证 URL，用 `--app=` 在 Edge 里开一个独立应用窗口（`DSH_WINDOW=tab` 可改成开标签页） |
 | `assets/deepseek-whale.svg` | 官方鲸鱼矢量图，取自 dsh web 前端包 |
 | `assets/deepseek-whale-black.svg` | 同一张图，去掉了官方"深色主题变白"的规则，用于修前端 favicon |
 | `deepseek-whale.ico` | 由 `install.ps1` 生成（已 gitignore） |
@@ -373,6 +392,19 @@ $n = [BitConverter]::ToUInt16($b,4)
 * 逐行 `Write-Host` 回显，和真正的服务器输出没有区别。
 * 句柄 `finally` 里保证不留孤儿服务：脚本被关掉时子进程一起结束。
 
+### 为什么用 `--app=` 而不是普通 URL
+
+普通 URL 是交给 **Edge 这个程序**的，所以那个页面永远属于 Edge 的任务栏按钮 —— 想让它单独有个鲸鱼图标
+是做不到的。`--app=<URL>` 让 Chromium 建一个**应用窗口**：窗口自己带身份，Windows 就给它**单独一个任务栏按钮**，
+而这个按钮的图标取自**窗口图标**，也就是页面 favicon（`install.ps1` 已经把它固定成黑色鲸鱼）。
+实测：同一个 Edge 进程里，普通窗口和 `--app=` 窗口在任务栏上是两个按钮。
+
+代价是没有标签栏和地址栏（本来就是"单页应用"的样子）。要退回标签页就设 `DSH_WINDOW=tab`。
+
+> 顺带一提：`--app=` 的窗口名在任务栏提示里可能仍显示为 "Microsoft Edge"，因为 Chromium 没有为它注册
+> 独立的"应用身份"（那是"把网站安装为应用"才会做的事）。**图标**是鲸鱼，这点是确定的；
+> 点两次也不会合并成一个窗口。
+
 ### 参数一律走环境变量
 
 `%*`（用户传给 `.cmd` 的参数）被写进 `DSH_ARGS`，其余路径也全部通过环境变量传给 `launch.ps1`，
@@ -407,7 +439,7 @@ echo done
 * 非 ASCII 路径由启动器在运行时自动检测。
 * 工作目录从不写进 `.cmd`，而是由快捷方式的"起始位置"承载 —— 那是 UTF-16 存储，安全。
 * 需要手工覆盖时，请设置环境变量 `DSH_NODE_EXE` / `DSH_BIN` / `DSH_EDGE_EXE` /
-  `DSH_WORKDIR` / `DSH_LAUNCH`，不要把非 ASCII 文本直接写进文件。
+  `DSH_WORKDIR` / `DSH_LAUNCH` / `DSH_WINDOW`，不要把非 ASCII 文本直接写进文件。
 
 另一个相关陷阱：**Windows PowerShell 5.1 会把无 BOM 的 `.ps1` 当作 ANSI 读取**，
 所以含非 ASCII 文本的无 BOM 脚本会被解码错。脚本源码要么保持 ASCII，
@@ -432,14 +464,17 @@ $fs.Position = 0x15
 比过去"一闪而过"好排查得多。
 
 **端口被占用。** 已经不会失败了。`dsh web` 默认用 `3080`；如果那里已经有一个 Harness 实例，
-启动器不再去抢端口，而是直接**新开一个 Edge 标签页**连上去（见[打开行为](#打开行为edge新标签页复用已运行的实例)）。
+启动器不再去抢端口，而是直接**新开一个应用窗口**连上去（见[打开行为](#打开行为edge-应用窗口复用已运行的实例)）。
 想同时跑两个互相独立的实例，给其中一个换端口：
 
 ```
 DeepSeekHarness.local.cmd --port 3099
 ```
 
-**标签页提示需要认证。** 连到已运行实例时，页面靠 Cookie 认证（30 天）。浏览器清过 Cookie、
+**任务栏上那个按钮不是鲸鱼。** 说明当前是标签页模式（`DSH_WINDOW=tab`）—— 标签页只能挂在 Edge 的按钮下。
+删掉这个环境变量（默认 `app`）就会变成独立应用窗口，任务栏上是自己的鲸鱼按钮。
+
+**窗口提示需要认证。** 连到已运行实例时，页面靠 Cookie 认证（30 天）。浏览器清过 Cookie、
 或者换了浏览器配置时会看到 401 页面，用已经在跑的那个控制台窗口打印的 URL 打开一次就行。
 
 **桌面图标还是旧的。** Explorer 会缓存图标，在桌面按 **F5** 刷新。
@@ -482,7 +517,7 @@ npm config set cache "$env:LOCALAPPDATA\npm-cache"
   安装脚本会报 `NOT WRITABLE` 并提示你提权跑一次；用 `-NoFaviconPatch` 可以完全跳过。
 
 启动认证 URL 的处理也值得一提：`launch.ps1` 只是把 `dsh web` 打印到 stdout 的那一行
-原样交给 `msedge.exe`。**URL（含 token）不落盘、不写日志、不传给任何别的程序**，
+原样交给 `msedge.exe`（`--app="<URL>"`）。**URL（含 token）不落盘、不写日志、不传给任何别的程序**，
 子进程的环境还经过 dsh 自己的 `scrubbedParentEnv()` 处理。
 
 ---
@@ -577,14 +612,15 @@ MIT — 见 [LICENSE](LICENSE)。
 Makes **DeepSeek Harness** (`@deepseek-ai/dsh`) open with a plain double-click on
 the desktop — **no administrator rights, no UAC prompt** — and gives the
 shortcut the official black whale icon on a **transparent background**. Every
-launch opens a **new Microsoft Edge tab**, including when a server is already
-running: then you simply get another page instead of a "port already in use"
-error.
+launch opens a **standalone Microsoft Edge application window** — its own taskbar
+button carrying the black whale, not grouped into the Microsoft Edge icon — and
+when a server is already running you simply get another window instead of a
+"port already in use" error.
 
 ```
 Desktop shortcut → DeepSeekHarness.local.cmd → launch.ps1 → node.exe …\@deepseek-ai\dsh\lib\bin.js web --no-open
                                                  ↓ reads the authenticated URL dsh web prints
-                                             msedge.exe <URL>     a new tab every time
+                                 msedge.exe --app=<URL>   a new window, own whale taskbar button
 ```
 
 ## The problem this solves
@@ -645,16 +681,17 @@ needed:
 node.exe "<npm-cache>\_npx\<hash>\node_modules\@deepseek-ai\dsh\lib\bin.js" web
 ```
 
-## Launch behaviour (Edge, a new tab, reuse of a running instance)
+## Launch behaviour (Edge app window, reuse of a running instance)
 
 The browser half lives in `launch.ps1`, not in the `.cmd`: the `.cmd` detects
-paths, `launch.ps1` opens pages. A double-click ends in one of two ways.
+paths, `launch.ps1` opens windows. A double-click ends in one of two ways.
 
-### 1. A server is already running → another page, no second server
+### 1. A server is already running → another window, no second server
 
 `launch.ps1` probes `127.0.0.1:<port>` (3080 by default). If a Harness server
 answers there it does **not** start a second one (that would only die with
-`EADDRINUSE`) — it just opens a new Edge tab on the instance that is running.
+`EADDRINUSE`) — it just opens another application window on the instance that is
+running.
 
 The probe only accepts two responses, both of which only the Harness produces, so
 an unrelated program squatting on 3080 is never mistaken for it:
@@ -662,10 +699,10 @@ an unrelated program squatting on 3080 is never mistaken for it:
 * `200` → the index page carries `<title>DeepSeek Harness</title>`
 * `401` → the body is `dsh web authentication required`
 
-So "console window still open, double-click again" costs you one extra page and
+So "console window still open, double-click again" costs you one extra window and
 nothing else.
 
-> That page authenticates with the browser cookie (30 days, written on the first
+> That window authenticates with the browser cookie (30 days, written on the first
 > visit). If the browser's cookies were just cleared you will see the
 > authentication notice — use the URL printed by the console window that is
 > already running.
@@ -673,31 +710,48 @@ nothing else.
 ### 2. No server → start one and hand its own URL to Edge
 
 ```
-node.exe …\dsh\lib\bin.js web --no-open       ← --no-open: dsh does not call the "default browser"
+node.exe …\dsh\lib\bin.js web --no-open             ← --no-open: dsh does not call the "default browser"
    ↓ stdout: "dsh web: http://127.0.0.1:3080/?token=…"
-msedge.exe "http://127.0.0.1:3080/?token=…"   ← handed to Edge, explicitly Edge
+msedge.exe --app="http://127.0.0.1:3080/?token=…"   ← handed to Edge, explicitly Edge
 ```
 
 * `--no-open`, because the default browser is not necessarily Edge; once the URL
   is known *we* hand it to `msedge.exe`.
 * `dsh web` only prints that line to stdout, so `launch.ps1` captures its stdout,
-  echoes it line by line, and opens the page when the URL appears. stderr stays
+  echoes it line by line, and opens the window when the URL appears. stderr stays
   attached to the console, so startup errors remain visible in real time and
   neither pipe can fill up and deadlock.
 * The `token` in the URL is valid for **that process only**, so it has to be read
   out of the output; it cannot be predicted.
 
-### 3. Always a new tab
+### 3. Every launch is a new standalone application window (its own whale button)
+
+`--app=<URL>` is Chromium's application-window mode: **no tab strip, no address
+bar**, one clean window. The point is the taskbar — its identity is *not* the same
+as a normal Edge window's, so:
+
+* it is a **separate taskbar button**, never merged into `Microsoft Edge`;
+* that button's icon is the **page icon**, i.e. the favicon that `install.ps1`
+  pins to the black whale;
+* every double-click opens another window (below) instead of focusing an old one.
+
+> **Want tabs back?** Set `DSH_WINDOW=tab` and `launch.ps1` falls back to opening
+> an ordinary new tab in the current Edge window (the taskbar then has only the
+> Edge button again).
+>
+> **Want it always in the taskbar?** Right-click the whale button → **Pin to
+> taskbar**. Note that a pin only relaunches that window; the launcher (the
+> desktop shortcut) stays the entry point that starts/reuses the server.
 
 Before opening, a one-shot `dsh-open=<ticks>` query parameter is appended. Both
 the Harness server and the Web client ignore it, but it makes the URL differ every
-time — so Edge cannot decide "that URL is already open" and re-activate an old tab
-instead of opening a new one.
+time — so Edge cannot decide "that URL is already open" and re-activate an old
+window instead of opening a new one.
 
 Other details:
 
-* **Double-click twice, three times — it works**: one more tab each time, all on
-  the same server.
+* **Double-click twice, three times — it works**: one more window each time, all
+  on the same server.
 * **The port is flexible**: `DeepSeekHarness.local.cmd --port 3099` probes and
   opens on that port.
 * **No Edge is not fatal**: only then does it fall back to the default browser,
@@ -796,15 +850,19 @@ safe.
 ### Step 5 — use it
 
 Double-click **DeepSeek Harness** on your desktop. A console window opens and a
-**new Microsoft Edge tab** lands on `http://127.0.0.1:3080` with the black whale
-as its tab icon.
+**standalone Microsoft Edge application window** lands on `http://127.0.0.1:3080`
+with no tab strip and no address bar — and its own taskbar button iconed with the
+black whale.
 
 **Keep that console window open** — closing it stops the server. It is also
 where startup errors appear.
 
 Double-click it again and, because the server is already running, **no second
-server starts**: you just get one more Edge tab on the same instance — never a
-"port already in use" error.
+server starts**: you just get one more application window on the same instance —
+never a "port already in use" error.
+
+> Prefer an ordinary tab inside your existing Edge window? Set `DSH_WINDOW=tab`
+> (the taskbar then shows only the Edge button again).
 
 ### Step 6 — verify it really needs no admin rights (optional)
 
@@ -854,7 +912,7 @@ next to it) opens Edge, and it will not create a desktop shortcut or the icon.
 | --- | --- |
 | `install.ps1` | Auto-detects Node + dsh + Edge, builds the icon, writes the launcher, patches the favicon and creates the desktop shortcut. |
 | `DeepSeekHarness.cmd` | The launcher entry point. Auto-detects Node/dsh; `install.ps1` also bakes in the detected paths. Double-clickable on its own. |
-| `launch.ps1` | The browser hand-off: reuse a running server or start one, read the authenticated URL `dsh web` prints, open it in a new Edge tab. |
+| `launch.ps1` | The browser hand-off: reuse a running server or start one, read the authenticated URL `dsh web` prints, and open it as an Edge application window (`--app=`; `DSH_WINDOW=tab` for a plain tab). |
 | `assets/deepseek-whale.svg` | Official whale logo, taken from the dsh web frontend bundle. |
 | `assets/deepseek-whale-black.svg` | The same artwork with the official "turn white on a dark theme" rule removed; used for the favicon patch. |
 | `deepseek-whale.ico` | Generated by `install.ps1` (git-ignored). |
@@ -972,6 +1030,24 @@ blank lines and breaks on `echo`'s special characters), so that part lives in
 * A `finally` block guarantees no orphan server: if the script is torn down, the
   child goes with it.
 
+### Why `--app=` instead of a plain URL
+
+A plain URL is handed to **Edge the program**, so that page always belongs to the
+Edge taskbar button — there is no way to give it a whale icon of its own.
+`--app=<URL>` makes Chromium build an **application window**: the window carries
+its own identity, so Windows gives it a **separate taskbar button**, and that
+button's icon comes from the **window icon**, i.e. the page favicon that
+`install.ps1` pins to the black whale. Measured: inside one Edge process, a normal
+window and an `--app=` window are two buttons on the taskbar.
+
+The price is no tab strip and no address bar (which is what a single-page app
+looks like anyway). Set `DSH_WINDOW=tab` to go back to tabs.
+
+> One caveat: the taskbar *tooltip* may still say "Microsoft Edge", because
+> Chromium registers no separate application identity for a `--app=` window (that
+> is what "Install this site as an app" would do). The **icon** is the whale, and
+> two launches are two windows rather than one merged group.
+
 ### Arguments always travel through the environment
 
 `%*` (the arguments the user passed to the `.cmd`) is stored in `DSH_ARGS`, and
@@ -1014,7 +1090,8 @@ Consequences, all handled here:
 * The working directory is never embedded in the `.cmd`; the shortcut carries it
   in its "Start in" field, which is stored as UTF-16 and therefore safe.
 * To override anything by hand, set `DSH_NODE_EXE`, `DSH_BIN`, `DSH_EDGE_EXE`,
-  `DSH_WORKDIR` or `DSH_LAUNCH` in the environment rather than editing non-ASCII
+  `DSH_WORKDIR`, `DSH_LAUNCH` or `DSH_WINDOW` in the environment rather than
+  editing non-ASCII
   text into the file.
 
 A related trap: **Windows PowerShell 5.1 reads BOM-less `.ps1` files as ANSI**,
@@ -1053,6 +1130,11 @@ DeepSeekHarness.local.cmd --port 3099
 authenticates with a cookie (30 days). After clearing cookies, or in a different
 browser profile, you get the 401 page — open the URL printed by the console
 window that is already running, once.
+
+**The taskbar button is Edge, not the whale.** That means tab mode is active
+(`DSH_WINDOW=tab`) — a tab can only belong to the Edge button. Remove that
+environment variable (the default is `app`) to get the standalone window with its
+own whale button back.
 
 **The tab icon is a white whale.** Either an upgrade replaced the frontend's
 `favicon.svg` (run `install.ps1` again), or the npm cache belongs to

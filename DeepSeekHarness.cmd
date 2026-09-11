@@ -4,8 +4,10 @@
 ::
 ::  Starts the `dsh` package that is already installed under your npx package
 ::  cache - using node.exe directly - and opens the UI in a NEW Microsoft Edge
-::  tab. If a Harness server is already running, no second server is started:
-::  the running instance just gets another page.
+::  application window, so the taskbar shows its own black-whale button instead
+::  of folding it into the Edge icon (set DSH_WINDOW=tab for a plain tab).
+::  If a Harness server is already running, no second server is started:
+::  the running instance just gets another window.
 ::
 ::  The browser hand-off itself lives in launch.ps1, which is the part a batch
 ::  file cannot do reliably: it has to read the authenticated URL that

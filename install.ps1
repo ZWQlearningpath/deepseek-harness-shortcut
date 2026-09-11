@@ -259,6 +259,16 @@ function Set-FrontendFavicon {
         Write-Warn "missing asset: $BlackSvg"
         return $false
     }
+    # Already in the desired state? Then there is nothing to write and no
+    # permissions to worry about - report success rather than a write error.
+    try {
+        if ([System.IO.File]::ReadAllText($Target) -eq [System.IO.File]::ReadAllText($BlackSvg)) {
+            Write-Ok "$Target (already the always-black whale)"
+            return $true
+        }
+    }
+    catch { }
+
     if (-not (Test-WritableFile -Target $Target)) {
         Write-Warn "cannot write $Target"
         Write-Warn 'this npm cache belongs to Administrators - the same reason npx needed an elevated console.'
@@ -475,12 +485,20 @@ if (-not $DesktopDir) { $DesktopDir = [Environment]::GetFolderPath('Desktop') }
 
 $favicon = Get-FrontendFaviconPath -DshBinPath $dsh
 $faviconWritable = $false
+$faviconPatched = $false
 $faviconState = 'not found (nothing to patch)'
 if ($favicon) {
     $faviconWritable = Test-WritableFile -Target $favicon
+    try {
+        $faviconPatched = (Test-Path -LiteralPath $whaleBlackSvg) -and
+                          ([System.IO.File]::ReadAllText($favicon) -eq [System.IO.File]::ReadAllText($whaleBlackSvg))
+    }
+    catch { $faviconPatched = $false }
+
     if (Test-Path -LiteralPath "$favicon.orig") { $faviconState = "$favicon (backup: favicon.svg.orig)" }
     else { $faviconState = "$favicon (no backup yet)" }
-    if (-not $faviconWritable) { $faviconState += ' [NOT WRITABLE by this account]' }
+    if ($faviconPatched) { $faviconState += ' [already the always-black whale]' }
+    elseif (-not $faviconWritable) { $faviconState += ' [NOT WRITABLE by this account]' }
 }
 
 Write-Step 'Resolved settings'
@@ -596,5 +614,5 @@ if ($runAsAdmin) { Write-Warn 'the RunAsUser bit is still set; the shortcut may 
 
 Write-Host ''
 Write-Host 'Done. Double-click the shortcut on your desktop.' -ForegroundColor Green
-Write-Host 'It opens the UI in a new Microsoft Edge tab, and reuses the running server when there is one.'
+Write-Host 'It opens the UI in its own Microsoft Edge app window (own taskbar whale button) and reuses the running server when there is one.'
 Write-Host 'The console window it opens must stay open; closing it stops the server.'
