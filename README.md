@@ -70,26 +70,89 @@ node.exe "<npm-cache>\_npx\<hash>\node_modules\@deepseek-ai\dsh\lib\bin.js" web
 
 ---
 
-## Quick start
+## Installation
+
+Follow these steps in order. Steps 1 and 2 are prerequisites; step 3 onwards is
+the actual install.
+
+### Step 0 — what you need
+
+* Windows 10 or 11
+* Node.js installed (`node --version` should print a version)
+* `dsh` installed at least once, so it exists in the npx cache
+
+### Step 1 — install dsh once
+
+Skip this if `npx @deepseek-ai/dsh --version` already prints a version.
+
+```powershell
+npx @deepseek-ai/dsh --version
+```
+
+> If this fails with `EPERM ... _cacache`, see
+> [Troubleshooting](#troubleshooting) — you may need to run it once from an
+> elevated console, or point npm at a writable cache. This is the very problem
+> the launcher exists to avoid *afterwards*.
+
+### Step 2 — get this repository
 
 ```powershell
 git clone https://github.com/<you>/deepseek-harness-shortcut.git
 cd deepseek-harness-shortcut
+```
 
-# see what it detects without changing anything
+No git? Use **Code → Download ZIP** on GitHub and unpack it anywhere.
+
+### Step 3 — check what the installer detects (writes nothing)
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -WhatIfOnly
+```
 
-# install: builds the icon, writes the launcher + desktop shortcut
+Expected output:
+
+```
+==> Detecting Node.js
+    C:\Program Files\nodejs\node.exe
+==> Locating the installed dsh package
+    C:\Users\<you>\AppData\Local\npm-cache\_npx\<hash>\node_modules\@deepseek-ai\dsh\lib\bin.js
+==> Resolved settings
+    ...
+==> WhatIfOnly: nothing was written.
+```
+
+If either path says *not found*, fix that before continuing (pass `-NodeExe` /
+`-DshBin`, or redo step 1).
+
+### Step 4 — install
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Then double-click **DeepSeek Harness** on your desktop.
+This:
 
-Prerequisite: `dsh` must have been installed once (which is also how it gets
-into the npx cache):
+1. writes `DeepSeekHarness.local.cmd` (your detected paths filled in),
+2. builds `deepseek-whale.ico`,
+3. creates the **DeepSeek Harness** shortcut on your desktop and clears its
+   "run as administrator" bit.
+
+It prints `run-as-administrator flag set: False` on success. Re-running it is
+safe.
+
+### Step 5 — use it
+
+Double-click **DeepSeek Harness** on your desktop. A console window opens and
+your browser lands on `http://127.0.0.1:3080`.
+
+**Keep that console window open** — closing it stops the server. It is also
+where startup errors appear.
+
+### Step 6 — verify it really needs no admin rights (optional)
 
 ```powershell
-npx @deepseek-ai/dsh --version
+$b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.lnk")
+($b[0x15] -band 0x20) -ne 0     # must print False
 ```
 
 ### If PowerShell refuses to run the script
@@ -102,7 +165,25 @@ That bypass applies to this one invocation only; it does not change any machine
 or user policy.
 
 Or skip the installer entirely: double-click **`DeepSeekHarness.cmd`**. It
-auto-detects Node and the dsh package at start-up.
+auto-detects Node and the dsh package at start-up, though it will not create a
+desktop shortcut or the icon.
+
+### Manual install (no script at all)
+
+1. Pick a folder, put `DeepSeekHarness.cmd` in it.
+2. Right-click it → **Send to → Desktop (create shortcut)**.
+3. Right-click the new shortcut → **Properties**:
+   * *Target*: the full path to `DeepSeekHarness.cmd`
+   * *Start in*: the folder you chose
+4. To set the icon: run `install.ps1 -NoShortcut` once to generate
+   `deepseek-whale.ico`, then **Properties → Change Icon → Browse** and pick it.
+
+### Uninstall
+
+1. Delete the desktop shortcut.
+2. Delete the folder you cloned (and the generated `deepseek-whale.ico` /
+   `DeepSeekHarness.local.cmd` inside it).
+3. Nothing was written to the registry, and no system setting was changed.
 
 ---
 
