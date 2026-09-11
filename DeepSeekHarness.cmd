@@ -2,8 +2,15 @@
 :: ===========================================================================
 ::  DeepSeek Harness - double-click launcher
 ::
-::  Runs the `dsh` package that is already installed under your npx package
-::  cache, using node.exe directly.
+::  Starts the `dsh` package that is already installed under your npx package
+::  cache - using node.exe directly - and opens the UI in a NEW Microsoft Edge
+::  tab. If a Harness server is already running, no second server is started:
+::  the running instance just gets another page.
+::
+::  The browser hand-off itself lives in launch.ps1, which is the part a batch
+::  file cannot do reliably: it has to read the authenticated URL that
+::  `dsh web` prints and hand exactly that URL to msedge.exe. This file does
+::  the detection and then gets out of the way.
 ::
 ::  WHY NOT "npx @deepseek-ai/dsh web" ?
 ::  npx revalidates its package against the registry on every start and writes
@@ -24,6 +31,8 @@
 ::    DSH_NODE_EXE   full path to node.exe
 ::    DSH_BIN        full path to @deepseek-ai/dsh/lib/bin.js
 ::    DSH_WORKDIR    working directory for the server
+::    DSH_EDGE_EXE   full path to msedge.exe
+::    DSH_LAUNCH     full path to launch.ps1
 :: ===========================================================================
 
 setlocal EnableExtensions
@@ -35,6 +44,14 @@ if not defined DSH_NODE_EXE set "DSH_NODE_EXE=__NODE_EXE__"
 :: >>>DSH_BIN
 if not defined DSH_BIN set "DSH_BIN=__DSH_BIN__"
 :: <<<DSH_BIN
+
+:: >>>EDGE_EXE
+if not defined DSH_EDGE_EXE set "DSH_EDGE_EXE=__EDGE_EXE__"
+:: <<<EDGE_EXE
+
+:: >>>LAUNCH_PS1
+if not defined DSH_LAUNCH set "DSH_LAUNCH=__LAUNCH_PS1__"
+:: <<<LAUNCH_PS1
 
 if not exist "%DSH_NODE_EXE%" call :detect_node
 if not exist "%DSH_BIN%" call :detect_dsh
@@ -61,20 +78,31 @@ if not exist "%DSH_BIN%" (
 if not defined DSH_WORKDIR set "DSH_WORKDIR=%~dp0"
 if exist "%DSH_WORKDIR%" cd /d "%DSH_WORKDIR%"
 
-echo Starting DeepSeek Harness...
-echo   node : %DSH_NODE_EXE%
-echo   dsh  : %DSH_BIN%
-echo.
-echo The browser UI opens automatically. Keep this window open while you use it;
-echo closing it stops the server.
-echo.
+:: the browser hand-off script ships next to this file
+if not exist "%DSH_LAUNCH%" set "DSH_LAUNCH=%~dp0launch.ps1"
+if not exist "%DSH_LAUNCH%" (
+  echo [DeepSeek Harness] launch.ps1 was not found next to this file.
+  echo Copy the whole repository folder, not just this .cmd.
+  echo.
+  pause
+  exit /b 1
+)
 
-"%DSH_NODE_EXE%" "%DSH_BIN%" web %*
+:: everything the launcher needs travels through the environment, so that a
+:: non-ASCII path never has to survive a command line
+set "DSH_ARGS=%*"
+
+set "DSH_PWSH=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+if not exist "%DSH_PWSH%" set "DSH_PWSH=powershell.exe"
+
+"%DSH_PWSH%" -NoProfile -ExecutionPolicy Bypass -File "%DSH_LAUNCH%"
 set "DSH_EXIT=%ERRORLEVEL%"
 
-echo.
-echo [DeepSeek Harness] exited with code %DSH_EXIT%.
-pause
+if not "%DSH_EXIT%"=="0" (
+  echo.
+  echo [DeepSeek Harness] the launcher stopped with code %DSH_EXIT%.
+  pause
+)
 exit /b %DSH_EXIT%
 
 :: --- helpers ---------------------------------------------------------------

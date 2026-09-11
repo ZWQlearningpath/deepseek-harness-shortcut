@@ -22,6 +22,9 @@ param(
     # Absolute path to @deepseek-ai/dsh/lib/bin.js. Auto-detected when omitted.
     [string]$DshBin,
 
+    # msedge.exe to open the UI with. Auto-detected when omitted.
+    [string]$EdgeExe,
+
     # Working directory for the launched server. Defaults to the folder this
     # repository lives in, which is a sensible project root for the UI.
     [string]$WorkDir,
@@ -35,6 +38,13 @@ param(
     # Build the icon but do not create the shortcut.
     [switch]$NoShortcut,
 
+    # Leave the installed dsh frontend's favicon alone. The browser tab then goes
+    # back to the official behaviour of turning into a WHITE whale on a dark theme.
+    [switch]$NoFaviconPatch,
+
+    # Put the installed frontend's original favicon.svg back and do nothing else.
+    [switch]$RestoreFavicon,
+
     # Detect and report only; write nothing.
     [switch]$WhatIfOnly
 )
@@ -44,6 +54,8 @@ $ErrorActionPreference = 'Stop'
 $repoDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $assetsDir = Join-Path $repoDir 'assets'
 $whaleSvg = Join-Path $assetsDir 'deepseek-whale.svg'
+$whaleBlackSvg = Join-Path $assetsDir 'deepseek-whale-black.svg'
+$launchPs1 = Join-Path $repoDir 'launch.ps1'
 
 function Write-Step([string]$text) { Write-Host "==> $text" -ForegroundColor Cyan }
 function Write-Ok([string]$text) { Write-Host "    $text" -ForegroundColor Green }
@@ -131,7 +143,103 @@ function Resolve-DshBin {
 }
 
 # ---------------------------------------------------------------------------
-# 3. build the whale icon (transparent background)
+# 3. locate Microsoft Edge
+# ---------------------------------------------------------------------------
+function Resolve-EdgeExe {
+    param([string]$Explicit)
+
+    if ($Explicit) {
+        if (Test-Path -LiteralPath $Explicit) { return (Resolve-Path -LiteralPath $Explicit).Path }
+        throw "the -EdgeExe path does not exist: $Explicit"
+    }
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if (${env:ProgramFiles(x86)}) { $candidates.Add((Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe')) }
+    if ($env:ProgramFiles) { $candidates.Add((Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe')) }
+    if ($env:LOCALAPPDATA) { $candidates.Add((Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe')) }
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path -LiteralPath $c)) { return (Resolve-Path -LiteralPath $c).Path }
+    }
+
+    $cmd = Get-Command msedge.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    return $null
+}
+
+# ---------------------------------------------------------------------------
+# 4. the favicon the browser tab shows
+#
+# The frontend that dsh serves ships its favicon with a dark-mode rule that turns
+# the whale WHITE whenever the browser is in a dark theme. The page icon should
+# stay a black whale, matching the shortcut icon, so this copies our always-black
+# copy over the installed file - backing the original up as favicon.svg.orig
+# first, which is also what -RestoreFavicon puts back.
+#
+# This is the only file the installer touches outside this repository. It is
+# rewritten whenever the package is reinstalled or upgraded, so run install.ps1
+# again afterwards.
+# ---------------------------------------------------------------------------
+function Get-FrontendFaviconPath {
+    param([string]$DshBinPath)
+
+    if (-not $DshBinPath) { return $null }
+
+    # ...\node_modules\@deepseek-ai\dsh\lib\bin.js
+    #   -> ...\node_modules\@deepseek-ai\dsh-web-frontend\dist\favicon.svg
+    $dshPkg = Split-Path -Parent (Split-Path -Parent $DshBinPath)
+    $scope = Split-Path -Parent $dshPkg
+    if (-not $scope) { return $null }
+
+    $target = Join-Path $scope 'dsh-web-frontend\dist\favicon.svg'
+    if (Test-Path -LiteralPath $target) { return $target }
+    return $null
+}
+
+# Can this account write that file? On a machine-wide Node.js install the npm
+# cache belongs to BUILTIN\Administrators with Users limited to ReadAndExecute -
+# the very reason `npx` needed an elevated console. The optional favicon patch
+# inherits that, while everything else here works without administrator rights.
+function Test-WritableFile {
+    param([string]$Target)
+
+    $dir = Split-Path -Parent $Target
+    $probe = Join-Path $dir ('.dsh-write-probe-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        $stream = [System.IO.File]::Create($probe)
+        $stream.Dispose()
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        return $true
+    }
+    catch { return $false }
+}
+
+function Update-FrontendFavicon {
+    param([string]$Target, [string]$BlackSvg, [switch]$Restore)
+
+    if (-not $Target) { return $false }
+    $backup = "$Target.orig"
+
+    if ($Restore) {
+        if (-not (Test-Path -LiteralPath $backup)) { return $false }
+        Copy-Item -LiteralPath $backup -Destination $Target -Force
+        return $true
+    }
+
+    if (-not (Test-Path -LiteralPath $backup)) {
+        Copy-Item -LiteralPath $Target -Destination $backup -Force
+    }
+
+    $want = [System.IO.File]::ReadAllText($BlackSvg)
+    $have = [System.IO.File]::ReadAllText($Target)
+    if ($have -ne $want) {
+        Copy-Item -LiteralPath $BlackSvg -Destination $Target -Force
+    }
+    return $true
+}
+
+# ---------------------------------------------------------------------------
+# 5. build the whale icon (transparent background)
 # ---------------------------------------------------------------------------
 function New-WhaleIcon {
     param([string]$SvgPath, [string]$OutIco)
@@ -256,7 +364,7 @@ function New-WhaleIcon {
 }
 
 # ---------------------------------------------------------------------------
-# 4. create the shortcut, with the "run as administrator" bit cleared
+# 6. create the shortcut, with the "run as administrator" bit cleared
 # ---------------------------------------------------------------------------
 function New-LauncherShortcut {
     param(
@@ -307,14 +415,31 @@ Write-Step 'Locating the installed dsh package'
 $dsh = Resolve-DshBin -Explicit $DshBin
 if ($dsh) { Write-Ok $dsh } else { Write-Warn 'dsh not found - run: npx @deepseek-ai/dsh --version' }
 
+Write-Step 'Locating Microsoft Edge'
+$edge = Resolve-EdgeExe -Explicit $EdgeExe
+if ($edge) { Write-Ok $edge } else { Write-Warn 'msedge.exe not found - the launcher will fall back to the default browser' }
+
 if (-not $WorkDir) { $WorkDir = $repoDir }
 if (-not $DesktopDir) { $DesktopDir = [Environment]::GetFolderPath('Desktop') }
+
+$favicon = Get-FrontendFaviconPath -DshBinPath $dsh
+$faviconWritable = $false
+$faviconState = 'not found (nothing to patch)'
+if ($favicon) {
+    $faviconWritable = Test-WritableFile -Target $favicon
+    if (Test-Path -LiteralPath "$favicon.orig") { $faviconState = "$favicon (backup: favicon.svg.orig)" }
+    else { $faviconState = "$favicon (no backup yet)" }
+    if (-not $faviconWritable) { $faviconState += ' [NOT WRITABLE by this account]' }
+}
 
 Write-Step 'Resolved settings'
 Write-Ok "node.exe   : $node"
 Write-Ok "dsh bin.js : $dsh"
+Write-Ok "msedge.exe : $edge"
 Write-Ok "workdir    : $WorkDir"
+Write-Ok "launch.ps1 : $launchPs1"
 Write-Ok "shortcut   : $(Join-Path $DesktopDir ($ShortcutName + '.lnk'))"
+Write-Ok "favicon    : $faviconState"
 
 if ($WhatIfOnly) {
     Write-Step 'WhatIfOnly: nothing was written.'
@@ -324,7 +449,22 @@ if ($WhatIfOnly) {
 if (-not $node) { throw 'cannot continue without node.exe; pass -NodeExe <path>' }
 if (-not $dsh) { throw 'cannot continue without the dsh package; run: npx @deepseek-ai/dsh --version' }
 
-# 4a. materialise a concrete launcher.
+# 4a. put the official favicon back and stop here.
+if ($RestoreFavicon) {
+    Write-Step 'Restoring the original frontend favicon'
+    if (-not $favicon) { Write-Warn 'the frontend favicon was not found; nothing to restore' }
+    elseif (-not (Test-Path -LiteralPath "$favicon.orig")) { Write-Warn "no backup next to $favicon; nothing was changed" }
+    elseif (-not $faviconWritable) {
+        Write-Warn "cannot write $favicon - run this once from an elevated PowerShell"
+    }
+    else {
+        try { Update-FrontendFavicon -Target $favicon -Restore | Out-Null; Write-Ok $favicon }
+        catch { Write-Warn "could not restore: $($_.Exception.Message)" }
+    }
+    return
+}
+
+# 4b. materialise a concrete launcher.
 #
 # The batch file must stay pure ASCII: cmd.exe parses a .cmd by byte offset
 # while decoding it with the console code page, so a UTF-8 non-ASCII character
@@ -347,6 +487,12 @@ else { $skipped += 'node.exe'; Write-Warn "node.exe path is not ASCII - the laun
 if (& $isAscii $dsh) { $body = $body.Replace('__DSH_BIN__', $dsh) }
 else { $skipped += 'dsh bin.js'; Write-Warn "dsh path is not ASCII - the launcher will auto-detect it" }
 
+if ($edge -and (& $isAscii $edge)) { $body = $body.Replace('__EDGE_EXE__', $edge) }
+else { $skipped += 'msedge.exe'; Write-Warn 'msedge.exe was not baked in - the launcher will auto-detect it' }
+
+if (& $isAscii $launchPs1) { $body = $body.Replace('__LAUNCH_PS1__', $launchPs1) }
+else { $skipped += 'launch.ps1'; Write-Warn 'the launch.ps1 path is not ASCII - it will be found next to the launcher' }
+
 [System.IO.File]::WriteAllText($launcherOut, $body, (New-Object System.Text.UTF8Encoding($false)))
 $target = $launcherOut
 
@@ -355,18 +501,52 @@ $badBytes = ([System.IO.File]::ReadAllBytes($launcherOut) | Where-Object { $_ -g
 if ($badBytes -ne 0) { throw "generated launcher contains $badBytes non-ASCII bytes; cmd.exe would mis-parse it" }
 Write-Ok $launcherOut
 
-# 4b. icon
+# 4c. icon
 Write-Step 'Building the whale icon'
 $ico = Join-Path $repoDir 'deepseek-whale.ico'
 New-WhaleIcon -SvgPath $whaleSvg -OutIco $ico | Out-Null
 Write-Ok "$ico ($((Get-Item -LiteralPath $ico).Length) bytes)"
 
+# 4d. the favicon the browser tab shows
+if ($NoFaviconPatch) {
+    Write-Step 'Favicon patch skipped (-NoFaviconPatch)'
+    Write-Warn 'the tab icon keeps the official behaviour: white whale on a dark theme'
+}
+else {
+    Write-Step 'Making the browser tab icon an always-black whale'
+    if (-not $favicon) {
+        Write-Warn 'the installed dsh frontend was not found next to the dsh package; nothing to patch'
+    }
+    elseif (-not (Test-Path -LiteralPath $whaleBlackSvg)) {
+        Write-Warn "missing asset: $whaleBlackSvg"
+    }
+    elseif (-not $faviconWritable) {
+        Write-Warn "cannot write $favicon"
+        Write-Warn 'this npm cache belongs to Administrators (the same reason npx needed an elevated console).'
+        Write-Warn 'Everything else in this installer still works without administrator rights.'
+        Write-Warn 'For the always-black tab icon, run this once from an elevated PowerShell:'
+        Write-Warn '  powershell -ExecutionPolicy Bypass -File .\install.ps1 -NoShortcut'
+        Write-Warn 'or skip the icon with -NoFaviconPatch.'
+    }
+    else {
+        try {
+            Update-FrontendFavicon -Target $favicon -BlackSvg $whaleBlackSvg | Out-Null
+            $patched = [System.IO.File]::ReadAllText($favicon)
+            if ($patched -match 'prefers-color-scheme') { Write-Warn "the patch did not take: $favicon" }
+            else { Write-Ok "$favicon (original kept as favicon.svg.orig)" }
+        }
+        catch {
+            Write-Warn "could not patch the favicon: $($_.Exception.Message)"
+        }
+    }
+}
+
 if ($NoShortcut) {
-    Write-Step 'NoShortcut: icon and launcher written, no shortcut created.'
+    Write-Step 'NoShortcut: launcher and icon written, no shortcut created.'
     return
 }
 
-# 4c. shortcut
+# 4e. shortcut
 Write-Step 'Creating the desktop shortcut'
 if (-not (Test-Path -LiteralPath $DesktopDir)) { New-Item -ItemType Directory -Path $DesktopDir -Force | Out-Null }
 $lnkPath = Join-Path $DesktopDir ($ShortcutName + '.lnk')
@@ -382,4 +562,5 @@ if ($runAsAdmin) { Write-Warn 'the RunAsUser bit is still set; the shortcut may 
 
 Write-Host ''
 Write-Host 'Done. Double-click the shortcut on your desktop.' -ForegroundColor Green
+Write-Host 'It opens the UI in a new Microsoft Edge tab, and reuses the running server when there is one.'
 Write-Host 'The console window it opens must stay open; closing it stops the server.'
