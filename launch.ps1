@@ -26,6 +26,9 @@
 #   DSH_WORKDIR    working directory for the server (optional)
 #   DSH_EDGE_EXE   full path to msedge.exe          (optional, auto-detected)
 #   DSH_WINDOW     'app' (default) or 'tab'         (optional)
+#   DSH_WINDOW_STATE   where the window geometry is remembered (optional)
+#   DSH_WINDOW_WAIT    seconds to wait for the new window to appear (default 20;
+#                      mostly useful for tests)
 #   DSH_ARGS       extra arguments the user passed to the .cmd, forwarded as-is
 #
 #   .\launch.ps1 -ProbeOnly    report what would happen, change nothing
@@ -116,6 +119,26 @@ function Open-EdgeWindow([string]$Url, [string]$EdgeExe, [string]$Mode) {
             Start-Process -FilePath $EdgeExe -ArgumentList ('"' + $Url + '"') | Out-Null
             return 'tab'
         }
+        # Application window. window-state.ps1 opens it and remembers its size,
+        # position and maximized state, because Chromium does not: a resized
+        # --app= window always comes back at the default geometry. If that helper
+        # is missing or cannot start Edge at all, fall back to a plain --app=
+        # launch. 'unidentified' also counts as success - it means Edge IS running
+        # and only the geometry memory was lost, so starting Edge again would give
+        # the user two windows.
+        $helper = Join-Path $PSScriptRoot 'window-state.ps1'
+        if (Test-Path -LiteralPath $helper) {
+            try {
+                $waitSeconds = 20
+                $waitText = Get-EnvText 'DSH_WINDOW_WAIT'
+                if ($waitText -match '^\d+$') { $waitSeconds = [int]$waitText }
+                $outcome = @(& $helper -Mode open -Edge $EdgeExe -Url $Url -WaitSeconds $waitSeconds)
+                if ($outcome -contains 'ok' -or $outcome -contains 'unidentified') { return 'app' }
+            }
+            catch {
+                Write-Warn "could not remember the window size this time: $($_.Exception.Message)"
+            }
+        }
         # Chromium parses --app=<url> into a standalone application window. The
         # window icon comes from the page favicon, which install.ps1 pins to the
         # black whale. The value is quoted because a token URL contains '&', which
@@ -184,6 +207,11 @@ if ($ProbeOnly) {
     if ($missing.Count -gt 0) { Write-Warn ("missing       : " + ($missing -join ', ')) }
     if (Test-DshWeb $port) { Write-Ok "server       : a Harness server is already running on $localUrl" }
     else { Write-Ok 'server       : nothing is listening (a new server would be started)' }
+    $stateHelper = Join-Path $PSScriptRoot 'window-state.ps1'
+    if (Test-Path -LiteralPath $stateHelper) {
+        foreach ($line in (& $stateHelper -Mode show)) { Write-Ok ("window state : $line") }
+    }
+    else { Write-Warn 'window state : window-state.ps1 not found - the window size will not be remembered' }
     exit 0
 }
 
@@ -218,6 +246,7 @@ Write-Host ''
 if ($windowMode -eq 'app') {
     Write-Host 'The UI opens in a standalone Microsoft Edge app window: no tabs, no address' -ForegroundColor Green
     Write-Host 'bar, and its own taskbar button with the whale icon (DSH_WINDOW=tab for a tab).'
+    Write-Host 'Its size, position and maximized state are remembered for the next launch.'
 }
 else {
     Write-Host 'The UI opens in a new Microsoft Edge tab.' -ForegroundColor Green

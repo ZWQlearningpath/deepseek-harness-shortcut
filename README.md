@@ -3,7 +3,7 @@
 让 **DeepSeek Harness**（`@deepseek-ai/dsh`）在桌面**双击直接打开，不需要管理员权限、不弹 UAC**，
 使用官方黑色鲸鱼图标（**透明背景，不是白底**），并且**每次都在 Microsoft Edge 里新开一个独立应用窗口**——
 任务栏上它是**自己的一个按钮、图标就是黑色鲸鱼**，不和 Edge 挤在一起；服务已经在跑时也只是再开一个窗口，
-而不是报「端口被占用」。
+而不是报「端口被占用」。**窗口的大小、位置和最大化状态会被记住**：下次打开就是你上次关掉时的样子。
 
 ```
 桌面快捷方式 → DeepSeekHarness.local.cmd → launch.ps1 → node.exe …\@deepseek-ai\dsh\lib\bin.js web --no-open
@@ -129,6 +129,15 @@ msedge.exe --app="http://127.0.0.1:3080/?token=…"  ← 交给 Edge，明确是
 * 任务栏上是**单独一个按钮**，不会并进 `Microsoft Edge` 那个图标里；
 * 这个按钮的图标就是**页面图标**，也就是我们改成黑色鲸鱼的那个 favicon；
 * 每次双击都再开一个窗口（见下），不会去聚焦旧窗口。
+
+**窗口大小也会被记住。** Chromium 自己**不**保存 `--app=` 窗口的几何信息（实测：改成 900x700 关掉，
+再打开又回到默认的 945x1012；换成完全一样的 URL 也一样），所以由 `window-state.ps1` 自己记：
+它在你关窗之前一直悄悄盯着那个窗口，把**位置、大小、是否最大化**写进
+`%LOCALAPPDATA%\DeepSeekHarness\window.json`，下次打开时原样还原。
+
+* 记的是"**还原后**的大小"：最大化状态下关掉，下次打开还是最大化，而你双击标题栏还原时拿到的也是上次的大小。
+* 想忘掉就删掉这个文件；想换个位置就设 `DSH_WINDOW_STATE=<路径>`。
+* 显示器拔掉后记忆的位置会落在屏幕外，这种情况只保留大小、位置自动挪回可见区域。
 
 > **想要回标签页？** 设环境变量 `DSH_WINDOW=tab`，`launch.ps1` 就会退回"在现有 Edge 窗口里新开一个标签页"
 > 的老行为（那样任务栏上就只有 Edge 一个图标了）。
@@ -259,11 +268,12 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 | 标签页图标是白色鲸鱼 | 两种可能：① dsh 升级把前端 favicon 覆盖了，重跑一次 `install.ps1`；② npm 缓存属于 `Administrators`（见[根因](#根因)），补丁写不进去 —— 在仓库目录里用**管理员** PowerShell 跑一次 `install.ps1 -OnlyFavicon`。这是唯一需要提权的一步 |
 | 打开的不是 Edge | 没找到 `msedge.exe`（控制台会说明）。装了 Edge 后重跑 `install.ps1`，或用 `-EdgeExe` 指定 |
 | 桌面图标还是旧的 | Explorer 图标缓存，桌面按 **F5** 刷新 |
-| 不想用脚本 | 直接双击 `DeepSeekHarness.cmd`，它运行时自动检测 Node 和 dsh（需要和 `launch.ps1` 在同一个文件夹里） |
+| 不想用脚本 | 直接双击 `DeepSeekHarness.cmd`，它运行时自动检测 Node 和 dsh（需要和 `launch.ps1`、`window-state.ps1` 在同一个文件夹里） |
+| 窗口大小没被记住 | 三种可能：① `window-state.ps1` 不在启动器旁边（控制台会提示）；② 上次是从别的入口（比如任务栏固定的那个按钮）打开窗口的，那种窗口不经过启动器；③ 状态文件被删/写不进去 —— 看看 `%LOCALAPPDATA%\DeepSeekHarness\window.json`，或设 `DSH_WINDOW_STATE` 换个位置 |
 
 ### 完全不用脚本的手动安装
 
-1. 把 `DeepSeekHarness.cmd` **和 `launch.ps1`** 放到一个固定文件夹
+1. 把 `DeepSeekHarness.cmd`、`launch.ps1` **和 `window-state.ps1`** 放到一个固定文件夹
 2. 右键 → **发送到 → 桌面快捷方式**
 3. 右键快捷方式 → **属性**：*目标* 填该 `.cmd` 的完整路径，*起始位置* 填所在文件夹
 4. 想换图标：先跑一次 `install.ps1 -NoShortcut` 生成 `deepseek-whale.ico`，
@@ -288,6 +298,7 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 | `install.ps1` | 自动检测 Node + dsh + Edge，生成图标，写启动器、修 favicon、建桌面快捷方式 |
 | `DeepSeekHarness.cmd` | 启动器入口。运行时自动检测 Node/dsh；`install.ps1` 也会把检测到的路径填进去。可单独双击 |
 | `launch.ps1` | 浏览器交接：复用已运行的服务或启动新的，读 `dsh web` 打印的认证 URL，用 `--app=` 在 Edge 里开一个独立应用窗口（`DSH_WINDOW=tab` 可改成开标签页） |
+| `window-state.ps1` | 记住那个应用窗口的位置/大小/最大化状态，下次打开原样还原（"窗口记忆"就靠它） |
 | `assets/deepseek-whale.svg` | 官方鲸鱼矢量图，取自 dsh web 前端包 |
 | `assets/deepseek-whale-black.svg` | 同一张图，去掉了官方"深色主题变白"的规则，用于修前端 favicon |
 | `deepseek-whale.ico` | 由 `install.ps1` 生成（已 gitignore） |
@@ -405,6 +416,24 @@ $n = [BitConverter]::ToUInt16($b,4)
 > 独立的"应用身份"（那是"把网站安装为应用"才会做的事）。**图标**是鲸鱼，这点是确定的；
 > 点两次也不会合并成一个窗口。
 
+### 窗口记忆为什么要自己写（`window-state.ps1`）
+
+因为 Chromium 不管这件事。实测：`--app=` 窗口改成 900x700 关掉，再打开回到默认的 945x1012；
+换成**完全相同**的 URL 也一样（所以不是我们那个 nonce 的锅）。装成"应用"（PWA）才会记，
+但那个要手动安装，而且 dsh 自带的 manifest 是 `display: fullscreen`。
+
+所以自己记，两个环节：
+
+* **记**：开窗口时顺手起一个隐藏的 `window-state.ps1 -Mode watch` 进程，它每 1.5 秒读一次那个窗口的
+  `GetWindowPlacement`，一变就写状态文件，窗口关掉后自己退出（最多 12 小时兜底）。用
+  `GetWindowPlacement` 而不是 `GetWindowRect`，是因为前者在**最大化时也会返回"还原后"的矩形** ——
+  这正是"最大化状态下关掉，下次还原回来还是原来大小"所需要的。
+* **还**：下次启动读出状态文件，先给 Edge 传 `--window-size` / `--window-position` / `--start-maximized`
+  当作"起手式"（省掉一次可见的跳动），再用 `SetWindowPlacement` 把结果**对齐到存下来的那个矩形**。
+
+读写都用同一对 Win32 API，所以**DPI 缩放不会让记下来的尺寸越滚越大**（如果读用物理像素、写用逻辑像素，
+150% 缩放下每开一次窗口就会放大 1.5 倍）。状态文件里只有 4 个整数和一个布尔值，没有别的。
+
 ### 参数一律走环境变量
 
 `%*`（用户传给 `.cmd` 的参数）被写进 `DSH_ARGS`，其余路径也全部通过环境变量传给 `launch.ps1`，
@@ -439,7 +468,7 @@ echo done
 * 非 ASCII 路径由启动器在运行时自动检测。
 * 工作目录从不写进 `.cmd`，而是由快捷方式的"起始位置"承载 —— 那是 UTF-16 存储，安全。
 * 需要手工覆盖时，请设置环境变量 `DSH_NODE_EXE` / `DSH_BIN` / `DSH_EDGE_EXE` /
-  `DSH_WORKDIR` / `DSH_LAUNCH` / `DSH_WINDOW`，不要把非 ASCII 文本直接写进文件。
+  `DSH_WORKDIR` / `DSH_LAUNCH` / `DSH_WINDOW` / `DSH_WINDOW_STATE`，不要把非 ASCII 文本直接写进文件。
 
 另一个相关陷阱：**Windows PowerShell 5.1 会把无 BOM 的 `.ps1` 当作 ANSI 读取**，
 所以含非 ASCII 文本的无 BOM 脚本会被解码错。脚本源码要么保持 ASCII，
@@ -501,10 +530,10 @@ npm config set cache "$env:LOCALAPPDATA\npm-cache"
 
 启动器做的事，就是让 `node.exe` 去跑你 npm 缓存里的那个 `bin.js`。
 那正是 `npx @deepseek-ai/dsh web` 会跑的同一份代码 —— 本仓库只改变**启动方式**，
-不改变**运行内容**。运行前可以自己看一眼 `DeepSeekHarness.cmd`、`launch.ps1` 和 `install.ps1`，
-三个文件都很短且有注释。
+不改变**运行内容**。运行前可以自己看一眼 `DeepSeekHarness.cmd`、`launch.ps1`、`window-state.ps1`
+和 `install.ps1`，四个文件都很短且有注释。
 
-三个文件都是自包含的：不下载任何东西、没有遥测，也不含任何凭据、
+四个文件都是自包含的：不下载任何东西、没有遥测，也不含任何凭据、
 用户名或本机专属路径 —— 所有路径都是运行时探测的。
 
 **唯一动到仓库之外的东西**是浏览器标签页图标那一步（可以用 `-NoFaviconPatch` 关掉）：
@@ -519,6 +548,11 @@ npm config set cache "$env:LOCALAPPDATA\npm-cache"
 启动认证 URL 的处理也值得一提：`launch.ps1` 只是把 `dsh web` 打印到 stdout 的那一行
 原样交给 `msedge.exe`（`--app="<URL>"`）。**URL（含 token）不落盘、不写日志、不传给任何别的程序**，
 子进程的环境还经过 dsh 自己的 `scrubbedParentEnv()` 处理。
+
+窗口记忆只写一个文件：`%LOCALAPPDATA%\DeepSeekHarness\window.json`，内容是
+`{"left":…,"top":…,"width":…,"height":…,"maximized":…}` —— 纯粹是窗口几何信息，
+不含 URL、token、会话或任何凭据。看它的窗口的那个隐藏 PowerShell 进程除此之外不做任何事，
+窗口一关就退出。
 
 ---
 
@@ -615,7 +649,8 @@ shortcut the official black whale icon on a **transparent background**. Every
 launch opens a **standalone Microsoft Edge application window** — its own taskbar
 button carrying the black whale, not grouped into the Microsoft Edge icon — and
 when a server is already running you simply get another window instead of a
-"port already in use" error.
+"port already in use" error. **Its size, position and maximized state are
+remembered**, so it comes back the way you left it.
 
 ```
 Desktop shortcut → DeepSeekHarness.local.cmd → launch.ps1 → node.exe …\@deepseek-ai\dsh\lib\bin.js web --no-open
@@ -734,6 +769,20 @@ as a normal Edge window's, so:
 * that button's icon is the **page icon**, i.e. the favicon that `install.ps1`
   pins to the black whale;
 * every double-click opens another window (below) instead of focusing an old one.
+
+**The window size is remembered too.** Chromium does *not* persist the geometry of
+an `--app=` window (measured: resize to 900x700, close, reopen — back to the
+default 945x1012, and byte-identical URLs behave the same), so `window-state.ps1`
+does it: while the window lives, a hidden copy of it polls the window and writes
+**position, size and maximized state** into
+`%LOCALAPPDATA%\DeepSeekHarness\window.json`; the next launch puts that geometry
+back.
+
+* What is stored is the **restore** rectangle: close it maximized and the next
+  window opens maximized, and un-maximizing still gives you the size you left.
+* Forget it by deleting that file; move it with `DSH_WINDOW_STATE=<path>`.
+* A geometry from a monitor that is no longer attached keeps its size and is moved
+  back onto a visible screen.
 
 > **Want tabs back?** Set `DSH_WINDOW=tab` and `launch.ps1` falls back to opening
 > an ordinary new tab in the current Edge window (the taskbar then has only the
@@ -886,7 +935,7 @@ next to it) opens Edge, and it will not create a desktop shortcut or the icon.
 
 ### Manual install (no script at all)
 
-1. Pick a folder, put `DeepSeekHarness.cmd` **and `launch.ps1`** in it.
+1. Pick a folder, put `DeepSeekHarness.cmd`, `launch.ps1` **and `window-state.ps1`** in it.
 2. Right-click it → **Send to → Desktop (create shortcut)**.
 3. Right-click the new shortcut → **Properties**:
    * *Target*: the full path to `DeepSeekHarness.cmd`
@@ -913,6 +962,7 @@ next to it) opens Edge, and it will not create a desktop shortcut or the icon.
 | `install.ps1` | Auto-detects Node + dsh + Edge, builds the icon, writes the launcher, patches the favicon and creates the desktop shortcut. |
 | `DeepSeekHarness.cmd` | The launcher entry point. Auto-detects Node/dsh; `install.ps1` also bakes in the detected paths. Double-clickable on its own. |
 | `launch.ps1` | The browser hand-off: reuse a running server or start one, read the authenticated URL `dsh web` prints, and open it as an Edge application window (`--app=`; `DSH_WINDOW=tab` for a plain tab). |
+| `window-state.ps1` | Remembers that window's position, size and maximized state and puts them back on the next launch - this is the "window memory". |
 | `assets/deepseek-whale.svg` | Official whale logo, taken from the dsh web frontend bundle. |
 | `assets/deepseek-whale-black.svg` | The same artwork with the official "turn white on a dark theme" rule removed; used for the favicon patch. |
 | `deepseek-whale.ico` | Generated by `install.ps1` (git-ignored). |
@@ -1048,6 +1098,33 @@ looks like anyway). Set `DSH_WINDOW=tab` to go back to tabs.
 > is what "Install this site as an app" would do). The **icon** is the whale, and
 > two launches are two windows rather than one merged group.
 
+### Why the window memory is written here (`window-state.ps1`)
+
+Because Chromium does not do it. Measured: resize an `--app=` window to 900x700,
+close it, reopen — the default 945x1012 comes back, and a **byte-identical** URL
+behaves exactly the same (so our nonce is not to blame). Installing the site as an
+app would remember it, but that needs a manual install and dsh's own manifest asks
+for `display: fullscreen`.
+
+So it is remembered here, in two halves:
+
+* **capture** - opening the window also starts a hidden
+  `window-state.ps1 -Mode watch` process. Every 1.5 s it reads that window's
+  `GetWindowPlacement` and rewrites the state file whenever something changed; it
+  exits by itself once the window is gone (12 h is only a backstop).
+  `GetWindowPlacement` rather than `GetWindowRect` because it reports the
+  **restore** rectangle even while the window is maximized - which is what makes
+  "closed maximized, reopened maximized, un-maximizes to the size you left" work.
+* **restore** - the next launch reads the state and first hands Edge
+  `--window-size` / `--window-position` / `--start-maximized` as a head start (so
+  the window does not visibly jump), then aligns the result with
+  `SetWindowPlacement` to the stored rectangle.
+
+Both halves use the same Win32 pair, so **DPI scaling cannot make the remembered
+size creep** (reading physical pixels while writing logical ones would grow the
+window by 1.5x per launch at 150%). The state file holds four integers and a
+boolean, nothing else.
+
 ### Arguments always travel through the environment
 
 `%*` (the arguments the user passed to the `.cmd`) is stored in `DSH_ARGS`, and
@@ -1090,8 +1167,8 @@ Consequences, all handled here:
 * The working directory is never embedded in the `.cmd`; the shortcut carries it
   in its "Start in" field, which is stored as UTF-16 and therefore safe.
 * To override anything by hand, set `DSH_NODE_EXE`, `DSH_BIN`, `DSH_EDGE_EXE`,
-  `DSH_WORKDIR`, `DSH_LAUNCH` or `DSH_WINDOW` in the environment rather than
-  editing non-ASCII
+  `DSH_WORKDIR`, `DSH_LAUNCH`, `DSH_WINDOW` or `DSH_WINDOW_STATE` in the
+  environment rather than editing non-ASCII
   text into the file.
 
 A related trap: **Windows PowerShell 5.1 reads BOM-less `.ps1` files as ANSI**,
@@ -1142,6 +1219,12 @@ own whale button back.
 written — run `install.ps1 -OnlyFavicon` once from an elevated PowerShell. That is
 the only step that needs elevation.
 
+**The window size is not remembered.** Three possibilities: `window-state.ps1` is
+not next to the launcher (the console says so); the window was opened some other
+way — a taskbar pin, say — which bypasses the launcher; or the state file is
+missing or unwritable. Look at `%LOCALAPPDATA%\DeepSeekHarness\window.json`, or
+point `DSH_WINDOW_STATE` somewhere else.
+
 **The desktop icon still looks like the old one.** Explorer caches icons; press
 **F5** on the desktop.
 
@@ -1169,10 +1252,10 @@ the shortcut.
 The launcher executes `node.exe` against a `bin.js` path inside your npm cache.
 That is the same code `npx @deepseek-ai/dsh web` would run — this repo only
 changes *how* it is started, not *what* is started. Review `DeepSeekHarness.cmd`,
-`launch.ps1` and `install.ps1` before running them; all three are short and
-commented.
+`launch.ps1`, `window-state.ps1` and `install.ps1` before running them; all four
+are short and commented.
 
-All three are self-contained: no downloads, no telemetry, and no credentials,
+All four are self-contained: no downloads, no telemetry, and no credentials,
 usernames or machine-specific paths. Every path is detected at run time.
 
 **The one thing outside this repository** the installer writes is the browser tab
@@ -1196,6 +1279,12 @@ The authenticated URL deserves a note too: `launch.ps1` only takes the line
 included) is never written to disk, never logged, and never passed to anything
 else**, and the child's environment is the one dsh's own `scrubbedParentEnv()`
 produces.
+
+The window memory writes exactly one file,
+`%LOCALAPPDATA%\DeepSeekHarness\window.json`, containing
+`{"left":…,"top":…,"width":…,"height":…,"maximized":…}` - window geometry only, no
+URL, token, session or credential. The hidden PowerShell that watches the window
+does nothing else and exits as soon as the window is gone.
 
 ## License
 

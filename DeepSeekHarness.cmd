@@ -5,7 +5,8 @@
 ::  Starts the `dsh` package that is already installed under your npx package
 ::  cache - using node.exe directly - and opens the UI in a NEW Microsoft Edge
 ::  application window, so the taskbar shows its own black-whale button instead
-::  of folding it into the Edge icon (set DSH_WINDOW=tab for a plain tab).
+::  of folding it into the Edge icon (set DSH_WINDOW=tab for a plain tab). That
+::  window's size and position are remembered by window-state.ps1.
 ::  If a Harness server is already running, no second server is started:
 ::  the running instance just gets another window.
 ::

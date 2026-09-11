@@ -61,6 +61,7 @@ $assetsDir = Join-Path $repoDir 'assets'
 $whaleSvg = Join-Path $assetsDir 'deepseek-whale.svg'
 $whaleBlackSvg = Join-Path $assetsDir 'deepseek-whale-black.svg'
 $launchPs1 = Join-Path $repoDir 'launch.ps1'
+$windowStatePs1 = Join-Path $repoDir 'window-state.ps1'
 
 function Write-Step([string]$text) { Write-Host "==> $text" -ForegroundColor Cyan }
 function Write-Ok([string]$text) { Write-Host "    $text" -ForegroundColor Green }
@@ -507,6 +508,12 @@ Write-Ok "dsh bin.js : $dsh"
 Write-Ok "msedge.exe : $edge"
 Write-Ok "workdir    : $WorkDir"
 Write-Ok "launch.ps1 : $launchPs1"
+if (Test-Path -LiteralPath $windowStatePs1) {
+    foreach ($line in (& $windowStatePs1 -Mode show)) { Write-Ok "window mem : $line" }
+}
+else {
+    Write-Warn 'window mem : window-state.ps1 is missing - the window size will not be remembered'
+}
 Write-Ok "shortcut   : $(Join-Path $DesktopDir ($ShortcutName + '.lnk'))"
 Write-Ok "favicon    : $faviconState"
 
@@ -614,5 +621,5 @@ if ($runAsAdmin) { Write-Warn 'the RunAsUser bit is still set; the shortcut may 
 
 Write-Host ''
 Write-Host 'Done. Double-click the shortcut on your desktop.' -ForegroundColor Green
-Write-Host 'It opens the UI in its own Microsoft Edge app window (own taskbar whale button) and reuses the running server when there is one.'
+Write-Host 'It opens the UI in its own Microsoft Edge app window (own taskbar whale button, remembered size) and reuses the running server when there is one.'
 Write-Host 'The console window it opens must stay open; closing it stops the server.'
