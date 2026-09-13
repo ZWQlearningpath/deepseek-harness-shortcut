@@ -10,6 +10,14 @@
 ::  If a Harness server is already running, no second server is started:
 ::  the running instance just gets another window.
 ::
+::  ADMINISTRATOR RIGHTS - ON BY DEFAULT.
+::  The harness runs tool commands, writes session and attachment files and
+::  patches the installed frontend; with a filtered token much of that fails.
+::  So this launcher asks for elevation: the desktop shortcut carries the
+::  "run as administrator" flag, and this file also re-launches itself elevated
+::  when it is started without it. Set DSH_NO_ELEVATE=1 to start unelevated
+::  instead, or re-run install.ps1 -NoElevate to rebuild the shortcut that way.
+::
 ::  The browser hand-off itself lives in launch.ps1, which is the part a batch
 ::  file cannot do reliably: it has to read the authenticated URL that
 ::  `dsh web` prints and hand exactly that URL to msedge.exe. This file does
@@ -19,8 +27,8 @@
 ::  npx revalidates its package against the registry on every start and writes
 ::  into the npm cache (_cacache). When that cache directory is not writable by
 ::  a normal user (a very common state for a machine-wide Node install), the
-::  plain double-click dies with EPERM and only works from an elevated console.
-::  This launcher never touches the npm cache, so no administrator is needed.
+::  plain double-click dies with EPERM. This launcher never touches the npm
+::  cache at all - it runs the already-installed package directly.
 ::
 ::  IMPORTANT - KEEP THIS FILE PURE ASCII.
 ::  cmd.exe parses a batch file by byte offset while decoding it with the
@@ -36,9 +44,28 @@
 ::    DSH_WORKDIR    working directory for the server
 ::    DSH_EDGE_EXE   full path to msedge.exe
 ::    DSH_LAUNCH     full path to launch.ps1
+::    DSH_NO_ELEVATE any value: do not request administrator rights
 :: ===========================================================================
 
 setlocal EnableExtensions
+
+:: --- administrator rights (default) -----------------------------------------
+:: Already elevated? Then the mandatory label is High: S-1-16-12288. The
+:: elevated copy of this file passes the same check, so this can never loop.
+:: DSH_NO_ELEVATE=1 opts out, and a refused prompt continues unelevated.
+if defined DSH_NO_ELEVATE goto :elevated
+whoami /groups 2>nul | findstr /C:"S-1-16-12288" >nul 2>nul
+if not errorlevel 1 goto :elevated
+
+echo [DeepSeek Harness] requesting administrator rights...
+echo   set DSH_NO_ELEVATE=1 to start without them
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -Verb RunAs -ArgumentList '%*'" 2>nul
+if errorlevel 1 (
+  echo [DeepSeek Harness] elevation was refused - continuing without administrator rights.
+  goto :elevated
+)
+exit /b 0
+:elevated
 
 :: >>>NODE_EXE
 if not defined DSH_NODE_EXE set "DSH_NODE_EXE=__NODE_EXE__"
@@ -109,25 +136,36 @@ if not "%DSH_EXIT%"=="0" (
 exit /b %DSH_EXIT%
 
 :: --- helpers ---------------------------------------------------------------
+:: The guards below test whether the path EXISTS, not whether the variable is
+:: defined. That matters: the template ships the markers __NODE_EXE__ /
+:: __DSH_BIN__ (and install.ps1 leaves them in place for a non-ASCII path), so
+:: the variables are always "defined" while pointing at nothing - testing
+:: "defined" would silently skip auto-detection for ever.
 :detect_node
-if not defined DSH_NODE_EXE for /f "delims=" %%I in ('where node.exe 2^>nul') do if not defined DSH_NODE_EXE set "DSH_NODE_EXE=%%I"
-if not defined DSH_NODE_EXE if exist "%ProgramFiles%\nodejs\node.exe" set "DSH_NODE_EXE=%ProgramFiles%\nodejs\node.exe"
-if not defined DSH_NODE_EXE if exist "%ProgramFiles(x86)%\nodejs\node.exe" set "DSH_NODE_EXE=%ProgramFiles(x86)%\nodejs\node.exe"
-if not defined DSH_NODE_EXE if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" set "DSH_NODE_EXE=%LOCALAPPDATA%\Programs\nodejs\node.exe"
+if not exist "%DSH_NODE_EXE%" for /f "delims=" %%I in ('where node.exe 2^>nul') do if not exist "%DSH_NODE_EXE%" set "DSH_NODE_EXE=%%I"
+if not exist "%DSH_NODE_EXE%" if exist "%ProgramFiles%\nodejs\node.exe" set "DSH_NODE_EXE=%ProgramFiles%\nodejs\node.exe"
+if not exist "%DSH_NODE_EXE%" if exist "%ProgramFiles(x86)%\nodejs\node.exe" set "DSH_NODE_EXE=%ProgramFiles(x86)%\nodejs\node.exe"
+if not exist "%DSH_NODE_EXE%" if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" set "DSH_NODE_EXE=%LOCALAPPDATA%\Programs\nodejs\node.exe"
 exit /b 0
 
 :detect_dsh
 :: 1. the usual locations of npm's cache
-if not defined DSH_BIN if exist "%LOCALAPPDATA%\npm-cache\_npx" call :scan_npx "%LOCALAPPDATA%\npm-cache\_npx"
-if not defined DSH_BIN if exist "%APPDATA%\npm-cache\_npx" call :scan_npx "%APPDATA%\npm-cache\_npx"
+if not exist "%DSH_BIN%" if exist "%LOCALAPPDATA%\npm-cache\_npx" call :scan_npx "%LOCALAPPDATA%\npm-cache\_npx"
+if not exist "%DSH_BIN%" if exist "%APPDATA%\npm-cache\_npx" call :scan_npx "%APPDATA%\npm-cache\_npx"
 :: 2. ask npm itself, if npm is on PATH
-if not defined DSH_BIN call :npm_cache
+if not exist "%DSH_BIN%" call :npm_cache
 if defined DSH_NPM_CACHE call :scan_npx "%DSH_NPM_CACHE%\_npx"
 :: 3. npm installed next to node.exe but not on PATH
-if not defined DSH_BIN call :npm_cache_beside_node
+if not exist "%DSH_BIN%" call :npm_cache_beside_node
 if defined DSH_NPM_CACHE call :scan_npx "%DSH_NPM_CACHE%\_npx"
+:: 3b. an npx cache kept next to node.exe. npm's cache setting can point
+::     somewhere else (it is a config file value) while the package the launcher
+::     runs still lives in the older cache beside node.exe.
+if not exist "%DSH_BIN%" if exist "%DSH_NODE_EXE%" for %%N in ("%DSH_NODE_EXE%") do call :scan_npx "%%~dpNnode_cache\_npx"
+if not exist "%DSH_BIN%" if exist "%DSH_NODE_EXE%" for %%N in ("%DSH_NODE_EXE%") do call :scan_npx "%%~dpN_npx"
+if not exist "%DSH_BIN%" if exist "%DSH_NODE_EXE%" for %%N in ("%DSH_NODE_EXE%") do call :scan_npx "%%~dpN..\node_cache\_npx"
 :: 4. give up and look for a dsh checkout in the working directory
-if not defined DSH_BIN if exist "%DSH_WORKDIR%node_modules\@deepseek-ai\dsh\lib\bin.js" set "DSH_BIN=%DSH_WORKDIR%node_modules\@deepseek-ai\dsh\lib\bin.js"
+if not exist "%DSH_BIN%" if exist "%DSH_WORKDIR%node_modules\@deepseek-ai\dsh\lib\bin.js" set "DSH_BIN=%DSH_WORKDIR%node_modules\@deepseek-ai\dsh\lib\bin.js"
 exit /b 0
 
 :npm_cache
@@ -146,6 +184,6 @@ exit /b 0
 :scan_npx
 if not exist "%~1" exit /b 0
 for /d %%D in ("%~1\*") do (
-  if not defined DSH_BIN if exist "%%D\node_modules\@deepseek-ai\dsh\lib\bin.js" set "DSH_BIN=%%D\node_modules\@deepseek-ai\dsh\lib\bin.js"
+  if not exist "%DSH_BIN%" if exist "%%D\node_modules\@deepseek-ai\dsh\lib\bin.js" set "DSH_BIN=%%D\node_modules\@deepseek-ai\dsh\lib\bin.js"
 )
 exit /b 0

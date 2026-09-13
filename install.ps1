@@ -38,6 +38,11 @@ param(
     # Build the icon but do not create the shortcut.
     [switch]$NoShortcut,
 
+    # Do NOT ask for administrator rights. The default is to request them: the
+    # harness runs tool commands, writes session and attachment files and patches
+    # the installed frontend, and a filtered token cannot do much of that.
+    [switch]$NoElevate,
+
     # Leave the installed dsh frontend's favicon alone. The browser tab then goes
     # back to the official behaviour of turning into a WHITE whale on a dark theme.
     [switch]$NoFaviconPatch,
@@ -100,7 +105,7 @@ function Resolve-NodeExe {
 # 2. locate the installed dsh package
 # ---------------------------------------------------------------------------
 function Resolve-DshBin {
-    param([string]$Explicit)
+    param([string]$Explicit, [string]$NodeExePath)
 
     if ($Explicit) {
         if (Test-Path -LiteralPath $Explicit) { return (Resolve-Path -LiteralPath $Explicit).Path }
@@ -145,6 +150,28 @@ function Resolve-DshBin {
             if ($hit) { return $hit }
         }
     }
+
+    # c) an npx cache kept next to node.exe. A machine-wide Node install can have
+    #    npm's cache pointed somewhere else since (that is exactly what happens
+    #    after moving the npm cache), while the package the launcher runs still
+    #    lives in the older cache beside node.exe.
+    if ($NodeExePath -and (Test-Path -LiteralPath $NodeExePath)) {
+        $nodeDir = Split-Path -Parent (Resolve-Path -LiteralPath $NodeExePath).Path
+        $nearNode = @(
+            (Join-Path $nodeDir 'node_cache\_npx'),
+            (Join-Path $nodeDir '_npx'),
+            (Join-Path (Split-Path -Parent $nodeDir) 'node_cache\_npx')
+        )
+        foreach ($root in $nearNode) {
+            if (-not (Test-Path -LiteralPath $root)) { continue }
+            $hit = Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object { Join-Path $_.FullName $rel } |
+                Where-Object { Test-Path -LiteralPath $_ } |
+                Select-Object -First 1
+            if ($hit) { return $hit }
+        }
+    }
+
     return $null
 }
 
@@ -433,7 +460,8 @@ function New-LauncherShortcut {
         [string]$LnkPath,
         [string]$Target,
         [string]$WorkingDirectory,
-        [string]$IconPath
+        [string]$IconPath,
+        [switch]$Elevate
     )
 
     $shell = New-Object -ComObject WScript.Shell
@@ -442,23 +470,25 @@ function New-LauncherShortcut {
     $lnk.Arguments = ''
     $lnk.WorkingDirectory = $WorkingDirectory
     $lnk.IconLocation = "$IconPath,0"
-    $lnk.Description = 'DeepSeek Harness web UI (no administrator rights required)'
+    if ($Elevate) { $lnk.Description = 'DeepSeek Harness web UI (requests administrator rights)' }
+    else { $lnk.Description = 'DeepSeek Harness web UI (no administrator rights)' }
     $lnk.WindowStyle = 1
     $lnk.Save()
 
-    # WScript.Shell can leave the RunAsUser bit set when the target is a .cmd,
-    # which would force a UAC prompt on every launch. The shell-link header
-    # stores LinkFlags at offset 0x14; bit 0x20 of byte 0x15 is RunAsUser.
+    # The shell-link header stores LinkFlags at offset 0x14; bit 0x20 of byte 0x15
+    # is RunAsUser, i.e. "run as administrator". WScript.Shell may set it on its
+    # own for a .cmd target, so both modes are written explicitly and then read
+    # back by the caller.
     $fs = [System.IO.File]::Open($LnkPath, [System.IO.FileMode]::Open,
                                  [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
     try {
         $buf = New-Object byte[] 1
         $fs.Position = 0x15
         $fs.Read($buf, 0, 1) | Out-Null
-        $cleared = [byte]($buf[0] -band (-bnot 0x20))
-        if ($cleared -ne $buf[0]) {
+        $wanted = if ($Elevate) { [byte]($buf[0] -bor 0x20) } else { [byte]($buf[0] -band (-bnot 0x20)) }
+        if ($wanted -ne $buf[0]) {
             $fs.Position = 0x15
-            $fs.Write($cleared, 0, 1)
+            $fs.Write($wanted, 0, 1)
         }
     }
     finally { $fs.Dispose() }
@@ -474,7 +504,7 @@ $node = Resolve-NodeExe -Explicit $NodeExe
 if ($node) { Write-Ok $node } else { Write-Warn 'node.exe not found - pass -NodeExe <path>' }
 
 Write-Step 'Locating the installed dsh package'
-$dsh = Resolve-DshBin -Explicit $DshBin
+$dsh = Resolve-DshBin -Explicit $DshBin -NodeExePath $node
 if ($dsh) { Write-Ok $dsh } else { Write-Warn 'dsh not found - run: npx @deepseek-ai/dsh --version' }
 
 Write-Step 'Locating Microsoft Edge'
@@ -508,6 +538,7 @@ Write-Ok "dsh bin.js : $dsh"
 Write-Ok "msedge.exe : $edge"
 Write-Ok "workdir    : $WorkDir"
 Write-Ok "launch.ps1 : $launchPs1"
+Write-Ok "elevation  : $(if ($NoElevate) { 'off (-NoElevate): runs with your normal token' } else { 'on (default): the shortcut asks for administrator rights' })"
 if (Test-Path -LiteralPath $windowStatePs1) {
     foreach ($line in (& $windowStatePs1 -Mode show)) { Write-Ok "window mem : $line" }
 }
@@ -607,19 +638,27 @@ if ($NoShortcut) {
 
 # 4f. shortcut
 Write-Step 'Creating the desktop shortcut'
+$elevate = -not $NoElevate
 if (-not (Test-Path -LiteralPath $DesktopDir)) { New-Item -ItemType Directory -Path $DesktopDir -Force | Out-Null }
 $lnkPath = Join-Path $DesktopDir ($ShortcutName + '.lnk')
-New-LauncherShortcut -LnkPath $lnkPath -Target $target -WorkingDirectory $WorkDir -IconPath $ico | Out-Null
+New-LauncherShortcut -LnkPath $lnkPath -Target $target -WorkingDirectory $WorkDir -IconPath $ico -Elevate:$elevate | Out-Null
 
-# verify, including that the admin bit really is clear
+# verify the run-as-administrator bit matches the requested mode
 $bytes = [System.IO.File]::ReadAllBytes($lnkPath)
 $runAsAdmin = ($bytes[0x15] -band 0x20) -ne 0
 Write-Ok $lnkPath
 Write-Ok ("run-as-administrator flag set: {0}" -f $runAsAdmin)
 
-if ($runAsAdmin) { Write-Warn 'the RunAsUser bit is still set; the shortcut may prompt for UAC' }
+if ($runAsAdmin -ne $elevate) {
+    Write-Warn ("the flag is {0} but {1} was requested - edit the shortcut by hand" -f $runAsAdmin, $elevate)
+}
+elseif ($elevate) {
+    Write-Warn 'every launch now shows a UAC prompt; pass -NoElevate (or set DSH_NO_ELEVATE=1) to go back'
+}
 
 Write-Host ''
 Write-Host 'Done. Double-click the shortcut on your desktop.' -ForegroundColor Green
 Write-Host 'It opens the UI in its own Microsoft Edge app window (own taskbar whale button, remembered size) and reuses the running server when there is one.'
+if ($elevate) { Write-Host 'Windows will ask for administrator rights first - that is intended, so tool commands can write outside the workspace.'
+}
 Write-Host 'The console window it opens must stay open; closing it stops the server.'
