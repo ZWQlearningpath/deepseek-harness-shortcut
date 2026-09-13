@@ -1,14 +1,12 @@
 # DeepSeek Harness — Windows 双击启动器
 
-让 **DeepSeek Harness**（`@deepseek-ai/dsh`）在桌面**双击直接打开** —— 启动时**默认请求管理员权限**（弹一次 UAC；
-用 `DSH_NO_ELEVATE=1` 或 `install.ps1 -NoElevate` 就能改回普通权限，见[运行权限](#运行权限默认管理员)）。
+让 **DeepSeek Harness**（`@deepseek-ai/dsh`）在桌面**双击直接打开，不需要管理员权限、不弹 UAC**，
 使用官方黑色鲸鱼图标（**透明背景，不是白底**），并且**每次都在 Microsoft Edge 里新开一个独立应用窗口**——
 任务栏上它是**自己的一个按钮、图标就是黑色鲸鱼**，不和 Edge 挤在一起；服务已经在跑时也只是再开一个窗口，
 而不是报「端口被占用」。**窗口的大小、位置和最大化状态会被记住**：下次打开就是你上次关掉时的样子。
 
 ```
-桌面快捷方式（带“以管理员身份运行”标志位 → UAC 一次）
-      → DeepSeekHarness.local.cmd → launch.ps1 → node.exe …\@deepseek-ai\dsh\lib\bin.js web --no-open
+桌面快捷方式 → DeepSeekHarness.local.cmd → launch.ps1 → node.exe …\@deepseek-ai\dsh\lib\bin.js web --no-open
                                             ↓ 读出 dsh web 打印的认证 URL
                                   msedge.exe --app=<URL>   每次一个新窗口，独立任务栏鲸鱼图标
 ```
@@ -21,7 +19,6 @@
 
 * [这个项目解决什么问题](#这个项目解决什么问题)
 * [根因](#根因)
-* [运行权限（默认管理员）](#运行权限默认管理员)
 * [打开行为（Edge 应用窗口、复用已运行的实例）](#打开行为edge-应用窗口复用已运行的实例)
 * [安装教程](#安装教程)
 * [装完之后有什么](#装完之后有什么)
@@ -88,34 +85,6 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\你的快捷方式
 ```
 node.exe "<npm-cache>\_npx\<hash>\node_modules\@deepseek-ai\dsh\lib\bin.js" web
 ```
-
----
-
-## 运行权限（默认管理员）
-
-**默认就是管理员。** 原因是实测出来的：harness 要跑工具命令、写会话/附件文件、给已安装的前端打补丁，
-而普通用户令牌（UAC 过滤令牌）在这些地方会失败 —— 沙箱运行器、工作区之外的写入、`D:\NodeJS\node_cache` 里的文件都不行。
-
-它由两道保险保证，缺一个也能生效：
-
-| 位置 | 做什么 |
-| --- | --- |
-| 桌面快捷方式 | 携带 `RunAsUser` 标志位（`.lnk` 头部偏移 `0x15` 的第 `0x20` 位 = **1**）→ Windows 直接弹 UAC |
-| `DeepSeekHarness.cmd` | 自己检查完整性级别（`whoami /groups` 里的 `S-1-16-12288` = 已提权）；没提权就用 `Start-Process -Verb RunAs` 重新拉起自己 |
-
-所以不管是双击快捷方式、还是直接双击 `DeepSeekHarness.cmd`，都会提权；已经提权过的那份不会重复提权（不会套娃）。
-
-### 想跑普通权限怎么办
-
-* 临时：设 `DSH_NO_ELEVATE=1`，或在那次启动前 `set DSH_NO_ELEVATE=1`；
-* 永久：重跑 `install.ps1 -NoElevate`，它会**清掉**快捷方式上的那个位（并把说明改回普通权限）；
-* 反过来，如果哪天双击不再弹 UAC：重跑一次 `install.ps1` 就能把位重新置上。
-
-### 代价（先说清楚）
-
-* **每次启动都会弹一次 UAC 确认框**（这是提权的必然代价，没有免确认的合法做法）；
-* DSH 及其所有工具命令都以管理员身份运行 —— 权限更大，**误删/误改的破坏面也更大**；
-* 浏览器（Edge）本身不需要管理员：正常情况下 Edge 已经在运行，我们只是把 URL 交给**已经存在**的那个普通权限浏览器进程，页面不会跑在管理员身份下。
 
 ---
 
@@ -254,9 +223,9 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 2. 生成 `deepseek-whale.ico`（桌面快捷方式图标）
 3. **把已安装的 dsh 前端 `favicon.svg` 换成"永远是黑色鲸鱼"的版本**（浏览器标签页图标；
    原始文件备份成同目录的 `favicon.svg.orig`，详见[图标是怎么做的](#图标是怎么做的)）
-4. 在桌面创建 **DeepSeek Harness** 快捷方式，并**置上**"以管理员身份运行"标志位（默认提权，用 `-NoElevate` 可改回清除）
+4. 在桌面创建 **DeepSeek Harness** 快捷方式，并清除"以管理员身份运行"标志位
 
-成功后最后一行会显示 `run-as-administrator flag set: True`（`-NoElevate` 时是 `False`）。重复运行是安全的。
+成功后最后一行会显示 `run-as-administrator flag set: False`。重复运行是安全的。
 
 > 升级或重装 dsh 之后，`dist/favicon.svg` 会被新的包覆盖，第 3 步的效果就没了 ——
 > 重新跑一次 `install.ps1` 即可。不想要这个改动就用 `-NoFaviconPatch`，
@@ -264,8 +233,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 >
 > **如果第 3 步提示 `NOT WRITABLE`**：npm 缓存目录属于 `BUILTIN\Administrators`（就是[根因](#根因)里
 > 那种机器级 Node 安装，普通账号只有读权限），那就从**管理员** PowerShell 跑一次
-> `install.ps1 -OnlyFavicon`（在仓库目录里跑）。顺便一提：启动器本身**默认也是管理员**（见[运行权限](#运行权限默认管理员)），
-> 所以日常双击启动时同样会弹一次 UAC。
+> `install.ps1 -OnlyFavicon`（在仓库目录里跑）。这是**唯一**需要提权的一步 —— 双击启动、开 Edge、复用实例都不需要管理员。
 
 ### 第 5 步 — 使用
 
@@ -280,11 +248,11 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 > 如果你更想要"在现有 Edge 窗口里开一个标签页"，设 `DSH_WINDOW=tab` 即可
 > （那任务栏上就只剩 Edge 一个图标了）。
 
-### 第 6 步 — 验证快捷方式确实带上了管理员标志位（可选）
+### 第 6 步 — 验证确实不需要管理员权限（可选）
 
 ```powershell
 $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.lnk")
-($b[0x15] -band 0x20) -ne 0     # 必须输出 True（默认提权）；想关掉就重跑 install.ps1 -NoElevate
+($b[0x15] -band 0x20) -ne 0     # 必须输出 False
 ```
 
 ### 常见问题
@@ -299,8 +267,6 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 | 不想用独立窗口 | 设 `DSH_WINDOW=tab`，退回"在现有 Edge 窗口里新开标签页" |
 | 标签页图标是白色鲸鱼 | 两种可能：① dsh 升级把前端 favicon 覆盖了，重跑一次 `install.ps1`；② npm 缓存属于 `Administrators`（见[根因](#根因)），补丁写不进去 —— 在仓库目录里用**管理员** PowerShell 跑一次 `install.ps1 -OnlyFavicon`。这是唯一需要提权的一步 |
 | 打开的不是 Edge | 没找到 `msedge.exe`（控制台会说明）。装了 Edge 后重跑 `install.ps1`，或用 `-EdgeExe` 指定 |
-| 双击后弹出 UAC | **这是默认行为**（要管理员才能跑工具命令）。不想提权：设 `DSH_NO_ELEVATE=1`，或重跑 `install.ps1 -NoElevate` |
-| 双击后**不**弹 UAC 了 | 标志位被改掉了。重跑 `install.ps1` 即可重新置上；也可用第 6 步那条命令确认 |
 | 桌面图标还是旧的 | Explorer 图标缓存，桌面按 **F5** 刷新 |
 | 不想用脚本 | 直接双击 `DeepSeekHarness.cmd`，它运行时自动检测 Node 和 dsh（需要和 `launch.ps1`、`window-state.ps1` 在同一个文件夹里） |
 | 窗口大小没被记住 | 三种可能：① `window-state.ps1` 不在启动器旁边（控制台会提示）；② 上次是从别的入口（比如任务栏固定的那个按钮）打开窗口的，那种窗口不经过启动器；③ 状态文件被删/写不进去 —— 看看 `%LOCALAPPDATA%\DeepSeekHarness\window.json`，或设 `DSH_WINDOW_STATE` 换个位置 |
@@ -350,7 +316,6 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 | `-DesktopDir <路径>` | 快捷方式写到哪里，默认是桌面 |
 | `-ShortcutName <名字>` | 快捷方式文件名（不含 `.lnk`），默认 `DeepSeek Harness` |
 | `-NoShortcut` | 只生成图标、启动器和 favicon 补丁，不建快捷方式 |
-| `-NoElevate` | 不请求管理员权限：快捷方式**不**置"以管理员身份运行"位（默认是置上） |
 | `-NoFaviconPatch` | 不动已安装 dsh 前端的 favicon（标签页图标恢复"深色主题变白"的官方行为） |
 | `-OnlyFavicon` | 只修补前端 favicon（浏览器标签页图标），其他什么都不做 —— npm 缓存属于 Administrators 时，提权运行就用这一条 |
 | `-RestoreFavicon` | 把前端原来的 `favicon.svg` 还原回去，其他什么都不做 |
@@ -400,8 +365,8 @@ $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.l
 * 这是安装脚本**唯一**动到的仓库之外的文件，见[安全说明](#安全说明)。
 * **可能唯一需要提权的一步**：npm 缓存目录属于 `BUILTIN\Administrators` 时（[根因](#根因)里那种
   机器级 Node 安装），普通账号连这个文件都改不了。`install.ps1` 会先探测写权限并明确提示
-  `NOT WRITABLE`，这时在仓库目录里用**管理员** PowerShell 跑一次 `install.ps1 -OnlyFavicon`。
-  日常启动同样以管理员运行（见[运行权限](#运行权限默认管理员)），所以这一步不会再额外弹 UAC。
+  `NOT WRITABLE`，这时在仓库目录里用**管理员** PowerShell 跑一次 `install.ps1 -OnlyFavicon`。启动器本身
+  （双击、开 Edge、复用实例）永远不需要管理员。
 
 ### 为什么 `DrawIcon` 可能读不了生成的图标
 
@@ -509,20 +474,16 @@ echo done
 所以含非 ASCII 文本的无 BOM 脚本会被解码错。脚本源码要么保持 ASCII，
 要么存成带 UTF-8 BOM 的文件。
 
-### `WScript.Shell` 与"以管理员身份运行"位
+### `WScript.Shell` 会自己加上"以管理员身份运行"
 
-当快捷方式的目标是 `.cmd` 时，`WScript.Shell.Save()` 对 `RunAsUser` 的处理并不一致，
-所以 `install.ps1` 不依赖它：保存之后**显式写入**想要的那一位，再回读校验。
-默认置位（提权），`-NoElevate` 时清零：
+当快捷方式的目标是 `.cmd` 时，`WScript.Shell.Save()` 可能把 `RunAsUser` 标志位留下，
+导致每次启动都弹 UAC。`install.ps1` 在保存后清除该位，并回读校验它为 `0`：
 
 ```powershell
 $fs = [System.IO.File]::Open($lnk, 'Open', 'ReadWrite', 'None')
 $fs.Position = 0x15
-# $elevate 时 置位 0x20，否则清除；随后回读该字节确认
+# 清除 LinkFlags 的 0x20 位（RunAsUser）
 ```
-
-`DeepSeekHarness.cmd` 里还有第二道保险：它检查 `whoami /groups` 里的 `S-1-16-12288`（High 完整性），
-没提权就 `Start-Process -Verb RunAs` 重新拉起自己，所以就算这个位被人改掉了也仍然是管理员启动。
 
 ---
 
@@ -566,9 +527,6 @@ npm config set cache "$env:LOCALAPPDATA\npm-cache"
 ---
 
 ## 安全说明
-
-启动器**默认以管理员身份运行**（见[运行权限](#运行权限默认管理员)），因为 harness 的工具命令、会话/附件写入和前端补丁需要完整令牌。
-代价是每次启动弹一次 UAC，且 DSH 及其子进程权限更大 —— 想要回到普通权限就用 `DSH_NO_ELEVATE=1` 或 `install.ps1 -NoElevate`。
 
 启动器做的事，就是让 `node.exe` 去跑你 npm 缓存里的那个 `bin.js`。
 那正是 `npx @deepseek-ai/dsh web` 会跑的同一份代码 —— 本仓库只改变**启动方式**，
@@ -686,9 +644,7 @@ MIT — 见 [LICENSE](LICENSE)。
 ## DeepSeek Harness — double-click launcher for Windows
 
 Makes **DeepSeek Harness** (`@deepseek-ai/dsh`) open with a plain double-click on
-the desktop — **administrator rights are requested by default** (one UAC prompt;
-opt out with `DSH_NO_ELEVATE=1` or `install.ps1 -NoElevate`, see
-[Run rights](#run-rights-administrator-by-default)) — and gives the
+the desktop — **no administrator rights, no UAC prompt** — and gives the
 shortcut the official black whale icon on a **transparent background**. Every
 launch opens a **standalone Microsoft Edge application window** — its own taskbar
 button carrying the black whale, not grouped into the Microsoft Edge icon — and
@@ -697,8 +653,7 @@ when a server is already running you simply get another window instead of a
 remembered**, so it comes back the way you left it.
 
 ```
-Desktop shortcut (carries the "run as administrator" flag → one UAC prompt)
-  → DeepSeekHarness.local.cmd → launch.ps1 → node.exe …\@deepseek-ai\dsh\lib\bin.js web --no-open
+Desktop shortcut → DeepSeekHarness.local.cmd → launch.ps1 → node.exe …\@deepseek-ai\dsh\lib\bin.js web --no-open
                                                  ↓ reads the authenticated URL dsh web prints
                                  msedge.exe --app=<URL>   a new window, own whale taskbar button
 ```
@@ -760,42 +715,6 @@ needed:
 ```
 node.exe "<npm-cache>\_npx\<hash>\node_modules\@deepseek-ai\dsh\lib\bin.js" web
 ```
-
-## Run rights: administrator by default
-
-**Elevated by default.** Measured, not assumed: the harness runs tool commands,
-writes session and attachment files and patches the installed frontend, and a
-filtered (UAC-limited) token fails at all of that - the sandbox runner, writes
-outside the workspace, files under `D:\NodeJS\node_cache`.
-
-Two independent guards, either one is enough:
-
-| Where | What it does |
-| --- | --- |
-| The desktop shortcut | carries the `RunAsUser` flag (byte `0x15`, bit `0x20`, = **1**), so Windows raises UAC itself |
-| `DeepSeekHarness.cmd` | checks its own integrity level (`S-1-16-12288` in `whoami /groups` = already elevated) and re-launches itself with `Start-Process -Verb RunAs` when it is not |
-
-So double-clicking the shortcut or the `.cmd` both end up elevated, and the
-already-elevated copy never re-launches itself.
-
-### Going back to a normal token
-
-* Once: set `DSH_NO_ELEVATE=1` before launching;
-* Permanently: re-run `install.ps1 -NoElevate`, which **clears** the shortcut
-  flag (and says so in its summary);
-* The other way round - if a double-click stops asking for UAC, re-run
-  `install.ps1` to set the flag again.
-
-### What it costs
-
-* **One UAC confirmation per launch** - that is inherent to elevation;
-* DSH and every tool command it runs now hold an administrator token, so a
-  mistake can reach further;
-* the browser does not need elevation: Edge is normally already running, so the
-  URL is handed to that existing, unelevated browser process and the page itself
-  never runs as administrator.
-
----
 
 ## Launch behaviour (Edge app window, reuse of a running instance)
 
@@ -959,11 +878,11 @@ This:
 3. **replaces the installed dsh frontend's `favicon.svg` with an always-black
    whale** (the browser tab icon; the original is kept as `favicon.svg.orig` —
    see [The icon](#the-icon)),
-4. creates the **DeepSeek Harness** shortcut on your desktop and **sets** its
-   "run as administrator" bit (`-NoElevate` clears it instead).
+4. creates the **DeepSeek Harness** shortcut on your desktop and clears its
+   "run as administrator" bit.
 
-It prints `run-as-administrator flag set: True` on success (`False` with
-`-NoElevate`). Re-running it is safe.
+It prints `run-as-administrator flag set: False` on success. Re-running it is
+safe.
 
 > Upgrading or reinstalling dsh unpacks a fresh frontend, so step 3 is undone —
 > run `install.ps1` again. Pass `-NoFaviconPatch` to skip it, or
@@ -973,9 +892,9 @@ It prints `run-as-administrator flag set: True` on success (`False` with
 > `BUILTIN\Administrators` (the machine-wide Node.js install described under
 > [Root cause](#root-cause), where ordinary accounts can only read), so run
 > `install.ps1 -OnlyFavicon` (from the repository folder) once from an **elevated**
-> PowerShell. Note that the launcher itself is elevated by default too
-> (see [Run rights](#run-rights-administrator-by-default)), so daily double-clicks
-> ask for UAC as well.
+> PowerShell. That is the
+> **only** step that ever needs administrator rights — double-clicking, opening
+> Edge and reusing a running instance never do.
 
 ### Step 5 — use it
 
@@ -994,11 +913,11 @@ never a "port already in use" error.
 > Prefer an ordinary tab inside your existing Edge window? Set `DSH_WINDOW=tab`
 > (the taskbar then shows only the Edge button again).
 
-### Step 6 — verify the shortcut really carries the administrator flag (optional)
+### Step 6 — verify it really needs no admin rights (optional)
 
 ```powershell
 $b = [System.IO.File]::ReadAllBytes("$env:USERPROFILE\Desktop\DeepSeek Harness.lnk")
-($b[0x15] -band 0x20) -ne 0     # must print True (default); use install.ps1 -NoElevate to clear it
+($b[0x15] -band 0x20) -ne 0     # must print False
 ```
 
 ### If PowerShell refuses to run the script
@@ -1061,7 +980,6 @@ next to it) opens Edge, and it will not create a desktop shortcut or the icon.
 | `-DesktopDir <path>` | Where to write the shortcut. Defaults to your Desktop. |
 | `-ShortcutName <name>` | Shortcut filename without `.lnk`. Defaults to `DeepSeek Harness`. |
 | `-NoShortcut` | Build the icon, launcher and favicon patch only. |
-| `-NoElevate` | Do not request administrator rights: the shortcut's "run as administrator" bit is cleared instead of set. |
 | `-NoFaviconPatch` | Leave the installed frontend's favicon alone (the tab icon goes back to the official white-on-dark behaviour). |
 | `-OnlyFavicon` | Patch the frontend favicon (the browser tab icon) and do nothing else - the command for the single elevated run when the npm cache belongs to Administrators. |
 | `-RestoreFavicon` | Put the frontend's original `favicon.svg` back and do nothing else. |
@@ -1121,7 +1039,7 @@ official file) over `dist/favicon.svg`, keeping the original next to it as
   [Root cause](#root-cause)) an ordinary account cannot write this file at all.
   `install.ps1` probes for write access first and says `NOT WRITABLE`; run
   `install.ps1 -OnlyFavicon` once from an elevated PowerShell. The launcher itself
-  — the launcher itself is elevated by default (see [Run rights](#run-rights-administrator-by-default)), so this patch adds no extra prompt.
+  — double-click, Edge, reuse — never needs administrator rights.
 
 ### Why `DrawIcon` may fail on the generated file
 
@@ -1257,7 +1175,7 @@ A related trap: **Windows PowerShell 5.1 reads BOM-less `.ps1` files as ANSI**,
 so a BOM-less script containing non-ASCII text is mis-decoded. Keep script
 sources ASCII, or save them with a UTF-8 BOM.
 
-### `WScript.Shell` and the "run as administrator" bit
+### `WScript.Shell` sets the "run as administrator" bit
 
 When a shortcut's target is a `.cmd`, `WScript.Shell.Save()` may leave the
 `RunAsUser` flag set, which forces a UAC prompt on every launch. `install.ps1`
@@ -1307,13 +1225,6 @@ way — a taskbar pin, say — which bypasses the launcher; or the state file is
 missing or unwritable. Look at `%LOCALAPPDATA%\DeepSeekHarness\window.json`, or
 point `DSH_WINDOW_STATE` somewhere else.
 
-**A UAC prompt appears on every double-click.** That is the default: the harness
-needs an administrator token for its tool commands. Opt out with
-`DSH_NO_ELEVATE=1`, or re-run `install.ps1 -NoElevate`.
-
-**A double-click stopped asking for UAC.** The shortcut flag was cleared. Re-run
-`install.ps1` to set it again, or check it with the command in step 6.
-
 **The desktop icon still looks like the old one.** Explorer caches icons; press
 **F5** on the desktop.
 
@@ -1337,12 +1248,6 @@ automatically.
 the shortcut.
 
 ## Security note
-
-The launcher **runs as administrator by default** (see
-[Run rights](#run-rights-administrator-by-default)): the harness's tool commands,
-session and attachment writes and frontend patch need an unfiltered token. The
-cost is one UAC prompt per launch and a wider blast radius for mistakes; use
-`DSH_NO_ELEVATE=1` or `install.ps1 -NoElevate` to go back to a normal token.
 
 The launcher executes `node.exe` against a `bin.js` path inside your npm cache.
 That is the same code `npx @deepseek-ai/dsh web` would run — this repo only

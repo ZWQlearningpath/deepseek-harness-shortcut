@@ -101,15 +101,6 @@ function Add-NewTabNonce([string]$Url) {
     return $Url + $separator + 'dsh-open=' + [string][DateTime]::UtcNow.Ticks
 }
 
-# Is this process running with administrator rights? The launcher asks for them
-# by default (the shortcut carries RunAsUser and the .cmd re-launches itself
-# elevated), because tool commands, session and attachment writes and frontend
-# patches need an unfiltered token. DSH_NO_ELEVATE=1 picks the other mode.
-function Test-Elevated {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    return ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
 # How the UI is opened:
 #   app (default) - an Edge application window: no tabs, no address bar, and its
 #                   own taskbar button carrying the whale icon, separate from the
@@ -209,7 +200,6 @@ if ($ProbeOnly) {
     Write-Ok "node.exe     : $(if ($nodeExe) { $nodeExe } else { '(unset)' })"
     Write-Ok "dsh bin.js   : $(if ($dshBin) { $dshBin } else { '(unset)' })"
     Write-Ok "msedge.exe   : $(if ($edgeExe) { $edgeExe } else { '(not found)' })"
-    Write-Ok "rights       : $(if (Test-Elevated) { 'administrator (elevated)' } else { 'standard user (not elevated)' })"
     Write-Ok "window mode  : $windowMode (DSH_WINDOW; 'app' = standalone window with its own taskbar button)"
     Write-Ok "workdir      : $(if ($workDir) { $workDir } else { '(inherited)' })"
     Write-Ok "port         : $port"
@@ -250,7 +240,6 @@ if (Test-DshWeb $port) {
 Write-Step 'Starting DeepSeek Harness'
 Write-Ok "node  : $nodeExe"
 Write-Ok "dsh   : $dshBin"
-if (Test-Elevated) { Write-Ok 'rights: administrator (elevated)' } else { Write-Warn 'rights: standard user - set DSH_NO_ELEVATE=1 to silence, or run as administrator' }
 if ($edgeExe) { Write-Ok "edge  : $edgeExe" } else { Write-Warn 'Microsoft Edge was not found; the default browser will be used' }
 if ($workDir) { Write-Ok "work  : $workDir" }
 Write-Host ''

@@ -10,14 +10,6 @@
 ::  If a Harness server is already running, no second server is started:
 ::  the running instance just gets another window.
 ::
-::  ADMINISTRATOR RIGHTS - ON BY DEFAULT.
-::  The harness runs tool commands, writes session and attachment files and
-::  patches the installed frontend; with a filtered token much of that fails.
-::  So this launcher asks for elevation: the desktop shortcut carries the
-::  "run as administrator" flag, and this file also re-launches itself elevated
-::  when it is started without it. Set DSH_NO_ELEVATE=1 to start unelevated
-::  instead, or re-run install.ps1 -NoElevate to rebuild the shortcut that way.
-::
 ::  The browser hand-off itself lives in launch.ps1, which is the part a batch
 ::  file cannot do reliably: it has to read the authenticated URL that
 ::  `dsh web` prints and hand exactly that URL to msedge.exe. This file does
@@ -44,28 +36,9 @@
 ::    DSH_WORKDIR    working directory for the server
 ::    DSH_EDGE_EXE   full path to msedge.exe
 ::    DSH_LAUNCH     full path to launch.ps1
-::    DSH_NO_ELEVATE any value: do not request administrator rights
 :: ===========================================================================
 
 setlocal EnableExtensions
-
-:: --- administrator rights (default) -----------------------------------------
-:: Already elevated? Then the mandatory label is High: S-1-16-12288. The
-:: elevated copy of this file passes the same check, so this can never loop.
-:: DSH_NO_ELEVATE=1 opts out, and a refused prompt continues unelevated.
-if defined DSH_NO_ELEVATE goto :elevated
-whoami /groups 2>nul | findstr /C:"S-1-16-12288" >nul 2>nul
-if not errorlevel 1 goto :elevated
-
-echo [DeepSeek Harness] requesting administrator rights...
-echo   set DSH_NO_ELEVATE=1 to start without them
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -Verb RunAs -ArgumentList '%*'" 2>nul
-if errorlevel 1 (
-  echo [DeepSeek Harness] elevation was refused - continuing without administrator rights.
-  goto :elevated
-)
-exit /b 0
-:elevated
 
 :: >>>NODE_EXE
 if not defined DSH_NODE_EXE set "DSH_NODE_EXE=__NODE_EXE__"
